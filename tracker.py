@@ -17,6 +17,7 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
+import betreff_filter
 import retention
 import sperrliste
 
@@ -312,6 +313,25 @@ def compute_score(count: int, recurrence: int, days_since_first: int) -> tuple[f
 
 
 # ── Hauptlogik ────────────────────────────────────────────────────────────────
+def _betreffe_nachziehen(conn) -> dict:
+    """A-14: dieselben Regeln über den bereits gespeicherten Bestand ziehen.
+
+    Läuft wie die Löschfristen bei JEDEM Lauf, auch wenn die Schnittstelle
+    nichts liefert. Der Schreibweg allein genügt nicht: die Datenbank überlebt
+    Rechnerwechsel und Wiedereinspielungen aus Sicherungen, und die Regelliste
+    wächst mit jeder Formulierung, die jemand nachträgt. Geprüft werden die
+    verschiedenen Werte, nicht die Zeilen — 538 statt 82.780.
+    """
+    ergebnis = betreff_filter.bestand_nachziehen(conn)
+    if ergebnis["werte_geaendert"]:
+        log.info("Betreff-Filter: %d von %d verschiedenen Werten entschärft "
+                 "(%d Lebenssituation, %d Hausnummer), %d Zeilen betroffen",
+                 ergebnis["werte_geaendert"], ergebnis["werte_geprueft"],
+                 ergebnis["lebenssituation"], ergebnis["hausnummer"],
+                 ergebnis["zeilen_geaendert"])
+    return ergebnis
+
+
 def _fristen_anwenden(conn) -> dict:
     """A-4: Löschfristen anwenden und das Ergebnis protokollieren.
 
@@ -354,6 +374,7 @@ def run():
         # 98 Tage lang nie ausgeführt.
         # Was hier NICHT läuft, ist die Wegfall-Markierung: die braucht einen
         # vollständigen Abruf, sonst gälte der Ausfall als Massenwegfall.
+        _betreffe_nachziehen(conn)
         _fristen_anwenden(conn)
         conn.close()
         return 1
@@ -392,14 +413,26 @@ def run():
         strasse = re.sub(r'\s+\d+[a-zA-Z]?(\s*[-/]\s*\d+[a-zA-Z]?)?\s*$', '', strasse).strip()
         plz_val = m.get("plz") or m.get("postleitzahl") or m.get("zip") or ""
 
+        # A-14: Betrefftexte, die eine Lebenssituation offenlegen, werden VOR
+        # dem Schreiben entschärft — nicht erst beim Export. Einmal gespeichert
+        # wäre die Angabe im Bestand, in jeder Sicherung und in jedem Klon.
+        kategorie_roh = m.get("kategorie") or m.get("category", "")
+        betreff_roh = m.get("betreff") or m.get("subject", "")
+        betreff_sicher, regeln = betreff_filter.entschaerfe(betreff_roh, kategorie_roh)
+        if regeln:
+            # Bewusst ohne den Originaltext im Protokoll — sonst stünde die
+            # Angabe in tracker.log, die der Filter gerade aus der Datenbank
+            # heraushält.
+            log.info("Betreff entschärft (Meldung %s, Regel %s)", mid, ",".join(regeln))
+
         conn.execute("""
             INSERT INTO meldungen
                 (id, fetched_at, datum, kategorie, betreff, bezirk, lat, lon, status, is_muell, strasse, plz)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             mid, now, datum,
-            m.get("kategorie") or m.get("category", ""),
-            m.get("betreff")   or m.get("subject",  ""),
+            kategorie_roh,
+            betreff_sicher,
             m.get("bezirk")    or m.get("district",  ""),
             lat, lon,
             m.get("status", ""),
@@ -429,6 +462,7 @@ def run():
         log.warning("Abruf nicht als vollständig gewertet (%s) — Wegfall-Markierung "
                     "übersprungen, es wird nichts neu vorgemerkt.", begruendung)
 
+    _betreffe_nachziehen(conn)
     _fristen_anwenden(conn)
 
     # ── Hotspot-Berechnung ────────────────────────────────────────────────────

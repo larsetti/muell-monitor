@@ -15,7 +15,7 @@
 Im Startmenü "cmd" öffnen:
 ```
 cd C:\Users\DEINNAME\Documents
-git clone https://github.com/larsetti/OA-Plus muell-monitor
+git clone https://github.com/larsetti/muell-monitor muell-monitor
 cd muell-monitor
 pip install requests
 ```
