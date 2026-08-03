@@ -539,3 +539,130 @@ def test_a12_render_bricht_bei_falscher_pruefsumme_ab(tmp_path):
             export_html.pruefe_sri()
     finally:
         export_html.TEMPLATE = orig
+
+
+# ── T-25 / T-40: Pflichtangaben auf der Live-Seite ───────────────────────────
+# Bis zum 03.08.2026 enthielt template.html weder Impressum noch
+# Datenschutzerklaerung noch Kontakt noch einen Hinweis auf das
+# Widerspruchsrecht — je null Treffer, waehrend maintenance.html alles davon
+# hatte (Sec M-03 vom 13.06.2026, Befund H-03 vom 29.07.2026). Die Sperrliste
+# nach Art. 21 war seit dem 29.07. technisch fertig, nur erfuhr niemand davon.
+
+TEMPLATE_HTML = (TECHNIK / "template.html").read_text(encoding="utf-8")
+MAINTENANCE_HTML = (TECHNIK / "maintenance.html").read_text(encoding="utf-8")
+
+
+def test_t25_template_hat_impressum_datenschutz_und_kontakt():
+    """Die drei Pflichtangaben stehen in der Live-Quelle."""
+    fehlend = [b for b in ("Impressum", "Datenschutzerkl", "info@muell-monitor.de")
+               if b not in TEMPLATE_HTML]
+    assert not fehlend, f"In template.html fehlen: {fehlend}"
+
+
+def test_t25_impressum_traegt_die_pflichtangaben_nach_ddg():
+    for teil in ("§ 5 DDG", "§ 18 Abs. 2 MStV", "Lars Wittkopf",
+                 "Welserstraße 3", "87463 Dietmannsried"):
+        assert teil in TEMPLATE_HTML, f"Impressum unvollstaendig, es fehlt: {teil!r}"
+
+
+def test_t40_widerspruchsrecht_ist_ausdruecklich_benannt():
+    """Der eigentliche Punkt von T-40: nicht nur die Erklaerung verlinken,
+    sondern den WEG zum Widerspruch benennen. Ohne ihn bleibt A-7 wirkungslos."""
+    for teil in ("Art. 21", "Widerspruch"):
+        assert teil in TEMPLATE_HTML, f"Widerspruchsrecht unvollstaendig: {teil!r}"
+    # Ein anklickbarer Weg, nicht bloss ein Satz darueber.
+    assert "Widerspruch%20nach%20Art.%2021%20DSGVO" in TEMPLATE_HTML, (
+        "Kein vorbereiteter Mail-Weg fuer den Widerspruch")
+    # Und ein Einstieg, der nicht erst durch die ganze Erklaerung fuehrt.
+    assert 'oeffneRecht(\'widerspruch\')' in TEMPLATE_HTML, (
+        "Kein direkter Einstieg zum Widerspruch")
+
+
+def test_t40_widerspruch_ist_von_der_kopfzeile_aus_erreichbar():
+    """Die Kopfzeile ist der einzige Ort, der auf jedem Geraet und in jedem
+    Zustand der Mobilansicht sichtbar ist. Der Seitenfuss der Seitenleiste
+    liegt auf Mobile im eingeklappten Blatt."""
+    kopf = TEMPLATE_HTML.split('<div class="main">')[0]
+    assert "hdr-legal" in kopf, "Pflichtangaben nicht in der Kopfzeile verankert"
+    assert "oeffneRecht('widerspruch')" in kopf
+
+
+def test_t25_keine_eckigen_platzhalter_in_den_ausgelieferten_seiten():
+    """Kein unausgefuellter Platzhalter darf produktiv online gehen.
+
+    Am 03.08.2026 stand in maintenance.html — und damit live, weil index.html
+    eine Kopie davon ist — "Verantwortlich: [Name / Firma, Anschrift, E-Mail]".
+    """
+    import re
+
+    def sichtbarer_text(html: str) -> str:
+        """Nur das, was der Besucher liest.
+
+        Eingebetteter Stil und Anwendungscode fallen weg, ebenso Kommentare
+        und die Auszeichnung selbst. Sonst schlagen CSS-Attributwaehler
+        ('[data-t="lvl"]') und Feldzugriffe ('[h.score_label]') an, die keine
+        Platzhalter sind.
+        """
+        ohne = re.sub(r"<script\b.*?</script>", " ", html, flags=re.S | re.I)
+        ohne = re.sub(r"<style\b.*?</style>", " ", ohne, flags=re.S | re.I)
+        ohne = re.sub(r"<!--.*?-->", " ", ohne, flags=re.S)
+        return re.sub(r"<[^>]*>", " ", ohne)
+
+    muster = re.compile(r"\[[^\]\n]{3,}\]")
+    for name, inhalt in (("template.html", TEMPLATE_HTML),
+                         ("maintenance.html", MAINTENANCE_HTML)):
+        treffer = muster.findall(sichtbarer_text(inhalt))
+        assert not treffer, f"Platzhalter im sichtbaren Text von {name}: {treffer}"
+
+
+def test_t25_maintenance_nennt_verantwortlichen_und_widerspruchsweg():
+    for teil in ("Lars Wittkopf", "info@muell-monitor.de", "Art. 21"):
+        assert teil in MAINTENANCE_HTML, f"maintenance.html unvollstaendig: {teil!r}"
+
+
+def test_t25_live_render_bleibt_ohne_freigabe_der_rechtstexte_gesperrt(tmp_path,
+                                                                       monkeypatch):
+    """Fail-closed: Freigabe-Marker allein genuegt nicht.
+
+    Solange die Marke im Vorlagentext steht, darf keine Live-Seite entstehen,
+    sondern es bleibt bei der Wartungsseite. Exit-Code 3.
+    """
+    vorlage = tmp_path / "template.html"
+    vorlage.write_text("<html><!-- __RECHTSTEXT_UNGEPRUEFT__ -->"
+                       "__APP_DATA_PLACEHOLDER__</html>", encoding="utf-8")
+    wartung = tmp_path / "maintenance.html"
+    wartung.write_text("<html>Wartung</html>", encoding="utf-8")
+    marker = tmp_path / "LIVE_FREIGEGEBEN"
+    marker.write_text("", encoding="utf-8")
+    ausgabe = tmp_path / "index.html"
+    ausgabe.write_text("<html>ALTE LIVE-SEITE MIT ORTSDATEN</html>", encoding="utf-8")
+
+    monkeypatch.setattr(export_html, "TEMPLATE", vorlage)
+    monkeypatch.setattr(export_html, "MAINTENANCE_PATH", wartung)
+    monkeypatch.setattr(export_html, "GO_LIVE_MARKER", marker)
+    monkeypatch.setattr(export_html, "OUT_PATH", ausgabe)
+
+    assert export_html.main() == 3
+    assert ausgabe.read_text(encoding="utf-8") == "<html>Wartung</html>", (
+        "Die alte Live-Seite steht noch")
+
+
+def test_t25_nach_freigabe_laeuft_der_live_render_wieder(tmp_path, monkeypatch):
+    """Gegenprobe: ohne die Marke ist der Weg frei. Sonst waere die Sperre
+    eine Sackgasse statt eines Tors."""
+    vorlage = tmp_path / "template.html"
+    vorlage.write_text("<html>__APP_DATA_PLACEHOLDER__ __LAST_UPDATE__</html>",
+                       encoding="utf-8")
+    monkeypatch.setattr(export_html, "TEMPLATE", vorlage)
+    assert export_html.rechtstexte_freigegeben() is True
+
+
+def test_t25_echte_vorlage_ist_noch_gesperrt():
+    """Solange T-03 und T-22 offen sind, MUSS die echte Vorlage gesperrt sein.
+
+    Faellt dieser Test, ist entweder die anwaltliche Freigabe erteilt (dann
+    diesen Test entfernen) oder jemand hat die Marke versehentlich geloescht.
+    """
+    assert export_html.RECHTSTEXT_MARKE in TEMPLATE_HTML, (
+        "Die Sperre der Rechtstexte ist aufgehoben. War das Absicht? "
+        "Anwaltliche Freigabe nach T-03/T-22 erteilt?")

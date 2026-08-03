@@ -24,6 +24,15 @@ OUT_PATH = Path(__file__).parent / "index.html"
 GO_LIVE_MARKER = Path(__file__).parent / "LIVE_FREIGEGEBEN"
 MAINTENANCE_PATH = Path(__file__).parent / "maintenance.html"
 
+# T-25 / T-40: Zweite Sperre neben dem Wartungs-Lock, für einen anderen Fall.
+# Der Wartungs-Lock schützt davor, dass die Live-Seite versehentlich anläuft.
+# Diese Marke schützt davor, dass sie ABSICHTLICH angeschaltet wird, bevor die
+# Rechtstexte anwaltlich freigegeben sind (T-03, T-22). Sie steht als Kommentar
+# im Vorlagentext und wird beim Freigeben von Hand entfernt — ein Handgriff,
+# der bewusst am Text selbst stattfindet und nicht in einer Konfiguration, die
+# man ohne Blick auf die Texte umlegt.
+RECHTSTEXT_MARKE = "__RECHTSTEXT_UNGEPRUEFT__"
+
 # A-11 / Sec M-02: Fallback-Wartungsseite als Konstante im Code.
 # Fehlt maintenance.html (versehentlich gelöscht, nicht ausgecheckt, Tippfehler
 # beim Umbenennen), darf keine alte Live-index.html mit Ortsdaten stehenbleiben.
@@ -378,42 +387,72 @@ def _schreibe_wenn_abweichend(inhalt: str) -> bool:
     OUT_PATH.write_text(inhalt, encoding='utf-8')
     return True
 
+def _wartungsseite_schreiben() -> int:
+    """Schreibt die Wartungsseite nach OUT_PATH. 0 normal, 2 mit Fallback."""
+    if MAINTENANCE_PATH.exists():
+        wartung = MAINTENANCE_PATH.read_text(encoding='utf-8')
+        # Idempotent: nur schreiben, wenn index.html abweicht oder fehlt.
+        if _schreibe_wenn_abweichend(wartung):
+            print(f"  Wartungsseite nach {OUT_PATH.name} geschrieben.")
+        else:
+            print(f"  {OUT_PATH.name} ist bereits die Wartungsseite, unverändert.")
+        return 0
+    # A-11 / Sec M-02: harter Abbruch statt passivem Stehenlassen.
+    # Ohne Wartungsquelle wird die eingebaute Fallback-Seite geschrieben,
+    # damit eine eventuell vorhandene alte Live-index.html mit Cluster-IDs,
+    # Straßen und Koordinaten nicht öffentlich stehenbleibt.
+    if _schreibe_wenn_abweichend(FALLBACK_WARTUNG_HTML):
+        print(f"  FEHLER: {MAINTENANCE_PATH.name} fehlt. "
+              f"Eingebaute Fallback-Wartungsseite nach {OUT_PATH.name} geschrieben.")
+    else:
+        print(f"  FEHLER: {MAINTENANCE_PATH.name} fehlt. "
+              f"{OUT_PATH.name} ist bereits die Fallback-Wartungsseite.")
+    print(f"  {MAINTENANCE_PATH.name} wiederherstellen, dann erneut ausführen. Exit-Code 2.")
+    return 2
+
+
+def rechtstexte_freigegeben() -> bool:
+    """T-25 / T-40: Steht die Freigabe der Rechtstexte noch aus?
+
+    Solange RECHTSTEXT_MARKE im Vorlagentext steht, gilt sie als nicht erteilt.
+    """
+    return RECHTSTEXT_MARKE not in TEMPLATE.read_text(encoding='utf-8')
+
+
 def main() -> int:
     """Rückgabewert ist der Exit-Code.
 
     0 = Normalfall (Wartungsseite steht oder Live-Seite gerendert)
     2 = A-11: maintenance.html fehlte, Fallback-Wartungsseite geschrieben
+    3 = T-25/T-40: Freigabe-Marker liegt vor, aber die Rechtstexte sind noch
+        nicht anwaltlich freigegeben. Es bleibt bei der Wartungsseite.
 
-    Wichtig für die Launcher: bei Exit-Code 2 muss index.html trotzdem
-    committet und gepusht werden. Der Fallback IST die Abhilfe — würde der
+    Wichtig für die Launcher: bei Exit-Code 2 und 3 muss index.html trotzdem
+    committet und gepusht werden. Die Wartungsseite IST die Abhilfe — würde der
     Launcher den Push überspringen, bliebe die alte Live-Seite mit Ortsdaten
-    öffentlich stehen. Exit-Code 2 heißt also "veröffentlichen und danach
-    nachsehen", nicht "abbrechen".
+    öffentlich stehen. Ein Exit-Code ungleich 0 heißt also "veröffentlichen und
+    danach nachsehen", nicht "abbrechen".
     """
     # Wartungs-Lock (Rev H-01): ohne Freigabe-Marker bleibt die Wartungsseite
     # stehen und der Live-Render wird übersprungen. Default ist Lock AN.
     if not GO_LIVE_MARKER.exists():
         print(f"Wartungs-Lock aktiv (kein {GO_LIVE_MARKER.name}), Live-Render übersprungen.")
-        if MAINTENANCE_PATH.exists():
-            wartung = MAINTENANCE_PATH.read_text(encoding='utf-8')
-            # Idempotent: nur schreiben, wenn index.html abweicht oder fehlt.
-            if _schreibe_wenn_abweichend(wartung):
-                print(f"  Wartungsseite nach {OUT_PATH.name} geschrieben.")
-            else:
-                print(f"  {OUT_PATH.name} ist bereits die Wartungsseite, unverändert.")
-            return 0
-        # A-11 / Sec M-02: harter Abbruch statt passivem Stehenlassen.
-        # Ohne Wartungsquelle wird die eingebaute Fallback-Seite geschrieben,
-        # damit eine eventuell vorhandene alte Live-index.html mit Cluster-IDs,
-        # Straßen und Koordinaten nicht öffentlich stehenbleibt.
-        if _schreibe_wenn_abweichend(FALLBACK_WARTUNG_HTML):
-            print(f"  FEHLER: {MAINTENANCE_PATH.name} fehlt. "
-                  f"Eingebaute Fallback-Wartungsseite nach {OUT_PATH.name} geschrieben.")
-        else:
-            print(f"  FEHLER: {MAINTENANCE_PATH.name} fehlt. "
-                  f"{OUT_PATH.name} ist bereits die Fallback-Wartungsseite.")
-        print(f"  {MAINTENANCE_PATH.name} wiederherstellen, dann erneut ausführen. Exit-Code 2.")
-        return 2
+        return _wartungsseite_schreiben()
+
+    # T-25 / T-40: Der Freigabe-Marker allein genügt nicht. Ohne freigegebene
+    # Rechtstexte ginge eine Seite mit Ortsbezug-Daten ohne belastbare
+    # Pflichtangaben online — genau der Zustand, den T-25 als Go-Live-Blocker
+    # festhält. Fail-closed: im Zweifel Wartungsseite.
+    if not rechtstexte_freigegeben():
+        print(f"Freigabe-Marker {GO_LIVE_MARKER.name} vorhanden, ABER die "
+              f"Rechtstexte sind nicht freigegeben.")
+        print(f"  {TEMPLATE.name} enthält noch die Marke {RECHTSTEXT_MARKE}.")
+        print(f"  Erst nach anwaltlicher Freigabe (T-03, T-22) die Marke aus "
+              f"{TEMPLATE.name} entfernen, dann erneut ausführen.")
+        code = _wartungsseite_schreiben()
+        print("  Es bleibt bei der Wartungsseite. Exit-Code 3.")
+        return 3 if code == 0 else code
+
     print(f"Freigabe-Marker {GO_LIVE_MARKER.name} vorhanden, rendere Live-Seite.")
     render_live()
     return 0

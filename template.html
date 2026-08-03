@@ -275,6 +275,90 @@ select.fs:focus{outline:2px solid var(--red)}
   .tabs .tab{font-size:10px;padding:8px 2px}
   /* Karten-Karte auf Mobile: volle Breite, tappable */
   .hcard{touch-action:manipulation}
+  /* Pflichtangaben bleiben auch auf Mobile erreichbar. Zugunsten des Platzes
+     wird die Beschriftung des zweiten Knopfes gekuerzt, nicht der Knopf
+     entfernt. Der Kopf traegt auf 360 px sonst nicht: Logo, Titel, Kennzahlen
+     und zwei Knoepfe nebeneinander. */
+  .hdr-title{font-size:12px}
+  .app-icon{height:32px}
+  .header{padding:0 8px}
+  .hdr-legal{gap:4px;margin-left:6px}
+  .hdr-legal-btn{font-size:9px;padding:4px 6px}
+  .hdr-legal-btn.lang .voll{display:none}
+  .hdr-legal-btn.lang .kurz{display:inline}
+}
+
+/* ── Pflichtangaben: Impressum, Datenschutz, Widerspruch (T-25 / T-40) ────── */
+.hdr-legal{display:flex;gap:5px;align-items:center;flex-shrink:0;margin-left:10px}
+.hdr-legal-btn{
+  background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);
+  color:white;font-family:inherit;font-size:10px;font-weight:600;
+  padding:5px 9px;border-radius:3px;cursor:pointer;white-space:nowrap;
+  transition:background .15s;
+}
+.hdr-legal-btn:hover{background:rgba(255,255,255,.3)}
+.hdr-legal-btn .kurz{display:none}
+.legal-foot{
+  padding:14px 12px 18px;border-top:1px solid var(--border);
+  font-size:11px;line-height:1.7;color:var(--gray);text-align:center;
+}
+.legal-foot button{
+  background:none;border:none;color:var(--red);font-family:inherit;font-size:11px;
+  text-decoration:underline;cursor:pointer;padding:0 3px;
+}
+.legal-foot a{color:var(--red)}
+#legalOverlay{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);
+  z-index:1000;justify-content:center;align-items:center;padding:16px;
+}
+#legalOverlay.show{display:flex}
+#legalBox{
+  background:white;color:#1a1a1a;border-radius:10px;padding:28px;
+  max-width:760px;width:100%;max-height:88vh;overflow-y:auto;
+  text-align:left;font-size:13px;line-height:1.65;
+}
+#legalBox h2{font-size:19px;margin:0 0 4px;color:#1a1a1a}
+#legalBox h3{font-size:15px;margin:22px 0 7px;color:var(--red);
+  border-top:1px solid var(--border);padding-top:14px}
+#legalBox h3:first-of-type{border-top:none;padding-top:0}
+#legalBox h4{font-size:13px;margin:14px 0 4px;color:#1a1a1a}
+#legalBox p{margin-bottom:9px;color:#333}
+#legalBox ul{margin:0 0 9px 18px;color:#333}
+#legalBox li{margin-bottom:4px}
+#legalBox a{color:var(--red)}
+#legalBox table{border-collapse:collapse;width:100%;margin-bottom:10px;font-size:12px}
+#legalBox th,#legalBox td{border:1px solid var(--border);padding:5px 8px;text-align:left;
+  vertical-align:top}
+#legalBox th{background:var(--light);font-weight:600}
+.legal-close{
+  float:right;background:none;border:none;font-size:26px;cursor:pointer;
+  color:#999;line-height:1;padding:0;margin:-6px -6px 0 0;
+}
+.legal-close:hover{color:#1a1a1a}
+.legal-adr{margin-bottom:9px;color:#333}
+/* Der Widerspruch nach Art. 21 ist der eigentliche Punkt von T-40: die
+   Sperrliste ist seit dem 29.07.2026 technisch fertig, nur erfuhr niemand
+   davon. Deshalb steht er als hervorgehobener Kasten oben und nicht als
+   Unterabschnitt irgendwo in der Erklärung. */
+.widerspruch-box{
+  background:#fff5f5;border:2px solid var(--red);border-radius:8px;
+  padding:16px 18px;margin:0 0 20px;
+}
+.widerspruch-box h3{color:var(--red);margin:0 0 8px;border:none;padding:0;font-size:16px}
+.widerspruch-box p{margin-bottom:8px}
+/* Kennung im Waehler ist noetig: '#legalBox a' oben ist staerker als zwei
+   Klassen und faerbte die Schrift sonst rot auf rotem Grund — der Knopf war
+   im Browser eine leere rote Flaeche. Beim Sichttest aufgefallen. */
+#legalBox .widerspruch-box .wsp-mail{
+  display:inline-block;background:var(--red);color:#fff;text-decoration:none;
+  padding:9px 16px;border-radius:4px;font-weight:600;margin-top:6px;font-size:13px;
+}
+#legalBox .widerspruch-box .wsp-mail:hover{background:#b81f1f;color:#fff}
+.legal-hint{background:var(--light);border-left:3px solid var(--gray);
+  padding:9px 12px;margin-bottom:14px;font-size:12px;color:#444}
+@media(max-width:768px){
+  #legalBox{padding:20px 16px;font-size:12.5px;max-height:92vh}
+  #legalBox table{font-size:11px}
 }
 </style>
 </head>
@@ -285,6 +369,17 @@ select.fs:focus{outline:2px solid var(--red)}
     <div class="hdr-title">Müll-Hotspot Monitor · Berlin</div>
   </div>
   <div class="hdr-stats" id="hStats"></div>
+  <!-- T-25 / T-40: Pflichtangaben. Bis zum 03.08.2026 hatte diese Seite weder
+       Impressum noch Datenschutzerklärung noch Kontakt (Sec M-03 vom 13.06.2026,
+       Befund H-03 vom 29.07.2026). Der Einstieg steht bewusst in der Kopfzeile:
+       sie ist auf jedem Gerät und in jedem Zustand der Mobilansicht sichtbar,
+       der Seitenfuß dagegen nicht. -->
+  <div class="hdr-legal">
+    <button class="hdr-legal-btn" onclick="oeffneRecht('widerspruch')"
+            title="Widerspruch gegen die Anzeige eines Ortes einlegen">Widerspruch</button>
+    <button class="hdr-legal-btn lang" onclick="oeffneRecht('impressum')"
+            title="Impressum, Datenschutzerklärung und Kontakt"><span class="voll">Impressum &amp; Datenschutz</span><span class="kurz">Impressum</span></button>
+  </div>
 </div>
 
 <div class="main">
@@ -383,6 +478,15 @@ select.fs:focus{outline:2px solid var(--red)}
       <div class="isec"><h3>Datengrundlage</h3>
         <p style="font-size:12px;color:#666;line-height:1.6">Ordnungsamt Online API · Berlin Open Data<br>Datenlizenz Deutschland – Namensnennung 2.0<br>Tagesaktuelle Aktualisierung</p>
       </div>
+    </div>
+
+    <!-- T-25 / T-40: zweiter Weg zu den Pflichtangaben, am Fuß der Seitenleiste.
+         Der Kopfzeilen-Einstieg ist der verlässliche; dieser hier ist der
+         gewohnte, weil Nutzer Pflichtangaben unten suchen. -->
+    <div class="legal-foot">
+      <button onclick="oeffneRecht('impressum')">Impressum</button>·<button onclick="oeffneRecht('datenschutz')">Datenschutzerklärung</button>·<button onclick="oeffneRecht('widerspruch')">Widerspruchsrecht</button><br>
+      Kontakt: <a href="mailto:info@muell-monitor.de">info@muell-monitor.de</a><br>
+      © 2026 Lars Wittkopf · muell-monitor.de
     </div>
   </div>
 </div>
@@ -879,6 +983,174 @@ document.addEventListener('DOMContentLoaded',()=>{
   renderHList();
   renderBList();
 });
+
+// ── Pflichtangaben ein- und ausblenden (T-25 / T-40) ────────────────────
+// ziel: 'widerspruch' | 'impressum' | 'datenschutz' — springt an die Stelle,
+// statt den Nutzer eine lange Erklärung durchsuchen zu lassen. Genau darum
+// geht es bei T-40: der Weg zum Widerspruch muss benannt sein, nicht nur die
+// Erklärung verlinkt.
+function oeffneRecht(ziel){
+  const ov=document.getElementById('legalOverlay');
+  ov.classList.add('show');
+  const anker=document.getElementById('rt-'+(ziel||'widerspruch'));
+  const box=document.getElementById('legalBox');
+  box.scrollTop = anker ? anker.offsetTop - box.offsetTop - 12 : 0;
+}
+function schliesseRecht(){
+  document.getElementById('legalOverlay').classList.remove('show');
+}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape') schliesseRecht();
+});
 </script>
+
+<!-- ══ Pflichtangaben (T-25 / T-40) ═════════════════════════════════════════
+     Quelle der Texte: audits\dsgvo\2026-07-28-datenschutzerklaerung-art13-14.md,
+     Teil B, Stand 29.07.2026. Nicht hier neu texten — Änderungen gehören in
+     dieses Dokument und werden von dort übernommen, sonst laufen die Fassung
+     für den Anwalt und die ausgelieferte Seite auseinander.
+
+     Der Verantwortliche ist nach Ü-01 (Entscheidung vom 28.07.2026) bis zur
+     notariellen Beurkundung des Gesellschaftsvertrags Lars Wittkopf
+     persönlich; ab der Beurkundung tritt die Oriatur GmbH an diese Stelle
+     (dann auch B.1 und das Impressum nachziehen).
+
+     __RECHTSTEXT_UNGEPRUEFT__
+     Diese Marke steht hier, solange die anwaltliche Freigabe nach T-03/T-22
+     aussteht. export_html.render_live() verweigert den Live-Aufbau, solange sie
+     im Vorlagentext steht. Sie zu entfernen ist der letzte Handgriff der
+     Freigabe — nicht vorher.
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="legalOverlay" onclick="if(event.target===this)schliesseRecht()">
+  <div id="legalBox">
+    <button class="legal-close" onclick="schliesseRecht()" aria-label="Schließen">&times;</button>
+    <h2>Rechtliche Angaben</h2>
+    <p style="color:#666;margin-bottom:20px">Impressum, Datenschutzerklärung und Ihr Widerspruchsrecht</p>
+
+    <div class="widerspruch-box" id="rt-widerspruch">
+      <h3>Sie möchten Widerspruch einlegen?</h3>
+      <p><strong>Sie haben das Recht, aus Gründen, die sich aus Ihrer besonderen Situation ergeben, jederzeit gegen die Verarbeitung Sie betreffender personenbezogener Daten Widerspruch einzulegen, die auf Grundlage von Art. 6 Abs. 1 lit. f DSGVO erfolgt (Art. 21 Abs. 1 DSGVO).</strong></p>
+      <p>Legen Sie Widerspruch ein, verarbeiten wir die betreffenden Daten nicht mehr, es sei denn, wir können zwingende schutzwürdige Gründe nachweisen, die Ihre Interessen, Rechte und Freiheiten überwiegen, oder die Verarbeitung dient der Geltendmachung, Ausübung oder Verteidigung von Rechtsansprüchen.</p>
+      <p><strong>So geht das:</strong> Betrifft Ihr Widerspruch einen dargestellten Schwerpunkt, nehmen wir diesen Ortsabschnitt von der Veröffentlichung aus. Eine Begründung genügt formlos per E-Mail. Hilfreich ist die Angabe der Straße und des Bezirks, damit wir den Ortsabschnitt zuordnen können.</p>
+      <a class="wsp-mail" href="mailto:info@muell-monitor.de?subject=Widerspruch%20nach%20Art.%2021%20DSGVO">Widerspruch per E-Mail einlegen</a>
+      <p style="margin-top:10px;margin-bottom:0;font-size:12px;color:#666">info@muell-monitor.de</p>
+    </div>
+
+    <h3 id="rt-impressum">Impressum</h3>
+    <p><strong>Angaben gemäß § 5 DDG / § 18 Abs. 2 MStV</strong></p>
+    <div class="legal-adr">
+      Lars Wittkopf<br>
+      c/o MDC#279<br>
+      Welserstraße 3<br>
+      87463 Dietmannsried
+    </div>
+    <p><strong>Kontakt:</strong><br>
+      E-Mail: <a href="mailto:info@muell-monitor.de">info@muell-monitor.de</a></p>
+    <p><strong>Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV:</strong><br>
+      Lars Wittkopf (Anschrift wie oben)</p>
+
+    <h4>Haftungsausschluss</h4>
+    <p>Die dargestellten Daten basieren auf der OpenData-API des Berliner Ordnungsamtes. Trotz sorgfältiger inhaltlicher Kontrolle wird keine Gewähr für Aktualität, Richtigkeit und Vollständigkeit übernommen.</p>
+
+    <h4>Copyright und Lizenz</h4>
+    <p>© 2026 Lars Wittkopf · Alle Rechte vorbehalten<br>
+      Code: <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener">AGPL-3.0</a> ·
+      Daten: <a href="https://www.govdata.de/dl-de/by-2-0" target="_blank" rel="noopener">DL-DE-BY-2.0</a></p>
+
+    <h3 id="rt-datenschutz">Datenschutzerklärung</h3>
+    <p style="color:#666">Stand: 29. Juli 2026</p>
+
+    <h4>1. Verantwortlicher</h4>
+    <div class="legal-adr">
+      Lars Wittkopf<br>
+      c/o MDC#279<br>
+      Welserstraße 3<br>
+      87463 Dietmannsried<br>
+      E-Mail: <a href="mailto:info@muell-monitor.de">info@muell-monitor.de</a>
+    </div>
+    <p>Ein Datenschutzbeauftragter ist nicht benannt.</p>
+
+    <h4>2. Worum es auf dieser Seite geht</h4>
+    <p>Müll-Monitor wertet Meldungen über Müllablagerungen im öffentlichen Raum aus, die das Ordnungsamt selbst als offene Daten veröffentlicht. Aus vielen Einzelmeldungen entstehen Belastungsschwerpunkte: Orte, an denen immer wieder Abfall abgelagert wird. Die Karte zeigt diese Schwerpunkte, nicht die einzelnen Meldungen.</p>
+
+    <h4>3. Welche Daten wir verarbeiten (Meldungsdaten, Art. 14 DSGVO)</h4>
+    <p>Je Meldung verarbeiten wir:</p>
+    <ul>
+      <li>die Straße ohne Hausnummer</li>
+      <li>die Postleitzahl und den Bezirk</li>
+      <li>die Geokoordinate, gerundet auf das Raster von etwa 150 Metern, das wir für die Auswertung verwenden</li>
+      <li>das Datum der Meldung</li>
+      <li>die Kategorie und den Betreff der Meldung</li>
+      <li>den Bearbeitungsstatus und eine technische Kennung</li>
+    </ul>
+    <p>Nicht verarbeitet werden: Hausnummern, Namen, Angaben zu den Personen, die eine Meldung abgegeben haben, sowie Meldungen, die keinen Abfallbezug haben.</p>
+    <p>Ein Bezug zu einer bestimmten Person entsteht nicht durch einen Namen, sondern kann sich aus der Verbindung von Ort, Zeitpunkt und Art der Meldung ergeben. Wir behandeln die Daten deshalb durchgehend als personenbezogen.</p>
+
+    <h4>4. Wozu wir die Daten verarbeiten und auf welcher Grundlage</h4>
+    <table>
+      <tr><th>Zweck</th><th>Rechtsgrundlage</th></tr>
+      <tr><td>Aufbau eines Datenbestands über gemeldete Ablagerungen</td><td>Art. 6 Abs. 1 lit. f DSGVO</td></tr>
+      <tr><td>Berechnung der Belastungsschwerpunkte und wiederkehrender Muster</td><td>Art. 6 Abs. 1 lit. f DSGVO</td></tr>
+      <tr><td>Öffentliche Darstellung der Schwerpunkte auf dieser Seite</td><td>Art. 6 Abs. 1 lit. f DSGVO</td></tr>
+      <tr><td>Bereitstellung und sicherer Betrieb dieser Seite</td><td>Art. 6 Abs. 1 lit. f DSGVO</td></tr>
+      <tr><td>Bearbeitung Ihrer Anfragen und Ihrer Rechte als betroffene Person</td><td>Art. 6 Abs. 1 lit. c DSGVO, im Übrigen Art. 6 Abs. 1 lit. f DSGVO</td></tr>
+    </table>
+    <p>Unser berechtigtes Interesse besteht darin, die Belastung des öffentlichen Raums nachvollziehbar zu machen, kommunale Stellen bei der Abfallbeseitigung zu unterstützen und die Leistungsfähigkeit unseres Angebots zu zeigen. Die Abwägung mit Ihren Interessen haben wir schriftlich dokumentiert. Sie erhalten sie auf Anfrage.</p>
+    <p>Um Ihre Interessen zu schützen, zeigen wir keine Hausnummern, fassen Meldungen zu Ortsabschnitten von etwa 150 Metern zusammen und stellen einen Schwerpunkt erst dar, wenn dort mindestens drei Meldungen vorliegen. Einzelne Meldungen werden nicht veröffentlicht.</p>
+
+    <h4>5. Woher die Daten stammen (Art. 14 Abs. 2 lit. f DSGVO)</h4>
+    <p>Die Meldungsdaten stammen aus dem offenen Datenangebot des Berliner Ordnungsamts, das über das Open-Data-Portal des Landes Berlin bereitgestellt wird. Die Nutzung erfolgt unter der Datenlizenz Deutschland Namensnennung 2.0. Wir erheben diese Daten nicht bei Ihnen.</p>
+
+    <h4>6. Wer die Daten erhält</h4>
+    <ul>
+      <li>GitHub, Inc., USA, als Anbieter des Hostings dieser Seite</li>
+      <li>OpenStreetMap Foundation, Vereinigtes Königreich, für die Kartendarstellung; beim Laden der Kartenkacheln wird Ihre IP-Adresse an deren Server übertragen</li>
+      <li>STRATO AG, Berlin, für den Betrieb der Domain und die Annahme von E-Mails an info@muell-monitor.de</li>
+      <li>Apple Distribution International Ltd., Irland, weil Nachrichten an diese Adresse an ein iCloud-Postfach weitergeleitet werden</li>
+    </ul>
+    <p>Eine Weitergabe des Datenbestands an weitere Stellen findet nicht statt. Wir setzen keine Cookies, betreiben keine Reichweitenmessung und keine Nachverfolgung.</p>
+
+    <h4>7. Übermittlung in Drittländer</h4>
+    <p>Das Hosting erfolgt bei GitHub, Inc. in den USA. Grundlage der Übermittlung ist der Angemessenheitsbeschluss der Europäischen Kommission zum EU-US Data Privacy Framework vom 10. Juli 2023. GitHub ist im Verzeichnis des US-Handelsministeriums unter dataprivacyframework.gov als aktiver Teilnehmer geführt. Die Kartendaten werden aus dem Vereinigten Königreich geladen, für das ebenfalls ein Angemessenheitsbeschluss der Kommission vorliegt.</p>
+
+    <h4>8. Wie lange wir speichern</h4>
+    <ul>
+      <li>Meldungsdaten löschen wir spätestens 30 Tage, nachdem sie im offenen Datenangebot der Behörde nicht mehr abrufbar sind.</li>
+      <li>Spätestens 24 Monate nach dem Meldedatum reduzieren wir den Bestand auf Auswertungen ohne Ortsbezug zu einzelnen Meldungen.</li>
+      <li>Serverprotokolle, die beim Aufruf dieser Seite anfallen, speichert der Hostinganbieter nach dessen eigenen Vorgaben. Wir haben darauf keinen Einfluss und werten sie nicht aus.</li>
+      <li>Anfragen und den zugehörigen Schriftwechsel bewahren wir drei Jahre nach Abschluss des Vorgangs auf, danach löschen wir sie.</li>
+    </ul>
+
+    <h4>9. Ihre Rechte</h4>
+    <p>Sie haben das Recht auf Auskunft (Art. 15 DSGVO), Berichtigung (Art. 16 DSGVO), Löschung (Art. 17 DSGVO) und Einschränkung der Verarbeitung (Art. 18 DSGVO).</p>
+    <p>Ein Hinweis zur Berichtigung: Wir übernehmen die Daten unverändert aus dem Angebot der Behörde. Ist eine Angabe dort falsch, wenden Sie sich bitte zusätzlich an die Behörde, damit die Berichtigung auch an der Quelle greift. In unserem eigenen Bestand berichtigen oder sperren wir die Angabe.</p>
+    <p>Ein Recht auf Datenübertragbarkeit nach Art. 20 DSGVO besteht hier nicht, weil die Verarbeitung weder auf einer Einwilligung noch auf einem Vertrag beruht.</p>
+    <p>Wenden Sie sich für alle Anliegen an: <a href="mailto:info@muell-monitor.de">info@muell-monitor.de</a></p>
+
+    <h4>10. Ihr Widerspruchsrecht</h4>
+    <p>Der Wortlaut steht oben in dem hervorgehobenen Kasten am Anfang dieser Seite, zusammen mit dem Weg, ihn auszuüben.</p>
+
+    <h4>11. Beschwerderecht</h4>
+    <p>Sie haben das Recht, sich bei einer Aufsichtsbehörde zu beschweren. Für uns zuständig ist:</p>
+    <div class="legal-adr">
+      Berliner Beauftragte für Datenschutz und Informationsfreiheit<br>
+      Alt-Moabit 59 bis 61 (Eingang Alt-Moabit 60)<br>
+      10555 Berlin<br>
+      Telefon: 030 13889-0<br>
+      E-Mail: <a href="mailto:mailbox@datenschutz-berlin.de">mailbox@datenschutz-berlin.de</a>
+    </div>
+    <p>Sie können sich auch an die Aufsichtsbehörde Ihres Wohnorts wenden.</p>
+
+    <h4>12. Besuch dieser Seite (Art. 13 DSGVO)</h4>
+    <p>Beim Aufruf dieser Seite verarbeitet unser Hostinganbieter technische Daten: Ihre IP-Adresse, den Zeitpunkt des Zugriffs, die abgerufene Datei, die übertragene Datenmenge und Angaben zu Browser und Betriebssystem. Diese Verarbeitung ist erforderlich, damit die Seite ausgeliefert und der Betrieb abgesichert werden kann. Grundlage ist Art. 6 Abs. 1 lit. f DSGVO.</p>
+    <p>Die Seite ist eine statische Anwendung. Alle dargestellten Daten sind fest in der Seite enthalten. Es findet keine Abfrage bei einem Server statt, während Sie die Karte bedienen. Beim Laden der Kartenkacheln wird Ihre IP-Adresse an den Kartendienst übertragen; das lässt sich technisch nicht vermeiden, wenn eine Karte dargestellt werden soll.</p>
+
+    <h4>13. Keine automatisierte Entscheidung im Einzelfall</h4>
+    <p>Eine automatisierte Entscheidung im Einzelfall einschließlich Profiling nach Art. 22 DSGVO findet nicht statt. Die Berechnung bewertet Orte, nicht Personen, und löst für sich genommen keine Maßnahme gegen eine Person aus.</p>
+
+    <h4>14. Änderungen dieser Erklärung</h4>
+    <p>Wir passen diese Erklärung an, wenn sich die Verarbeitung ändert. Es gilt jeweils die auf dieser Seite veröffentlichte Fassung.</p>
+  </div>
+</div>
 </body>
 </html>
