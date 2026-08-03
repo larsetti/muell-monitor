@@ -540,6 +540,14 @@ def run():
                 meldungen_count  = excluded.meldungen_count,
                 recurrence_count = excluded.recurrence_count,
                 last_seen        = excluded.last_seen,
+                -- M-02 (Nachaudit 29.07.2026): first_seen muss MIT fortgeschrieben
+                -- werden. Ohne diese Zeile blieb der Wert auf dem Stand der ersten
+                -- Anlage stehen; loeschte die Aufbewahrungsroutine spaeter die
+                -- aelteste Meldung einer Zelle, ueberlebte deren Meldedatum in der
+                -- veroeffentlichten Zelle. Es wurde also ein Datum gezeigt, zu dem
+                -- es keine Meldung mehr gab. excluded.first_seen ist bei jedem Lauf
+                -- neu aus dem tatsaechlichen Bestand der Zelle berechnet.
+                first_seen       = excluded.first_seen,
                 score            = excluded.score,
                 score_label      = excluded.score_label,
                 strasse          = excluded.strasse,

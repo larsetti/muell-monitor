@@ -666,3 +666,50 @@ def test_t25_echte_vorlage_ist_noch_gesperrt():
     assert export_html.RECHTSTEXT_MARKE in TEMPLATE_HTML, (
         "Die Sperre der Rechtstexte ist aufgehoben. War das Absicht? "
         "Anwaltliche Freigabe nach T-03/T-22 erteilt?")
+
+
+# ── M-02 (Nachaudit 29.07.2026): first_seen wird fortgeschrieben ─────────────
+
+def test_m02_first_seen_ueberlebt_die_loeschung_der_aeltesten_meldung_nicht(tmp_path,
+                                                                            monkeypatch):
+    """Loescht die Aufbewahrungsroutine die aelteste Meldung einer Zelle, darf
+    deren Meldedatum nicht in der veroeffentlichten Zelle stehenbleiben.
+
+    Vorher fehlte 'first_seen = excluded.first_seen' in der ON-CONFLICT-Klausel:
+    der Wert blieb auf dem Stand der ersten Anlage. Die Zelle zeigte damit ein
+    Datum, zu dem es keine Meldung mehr gab.
+    """
+    db = tmp_path / "m02.db"
+    monkeypatch.setattr(tracker, "DB_PATH", db)
+
+    def lauf(meldungen):
+        monkeypatch.setattr(tracker, "fetch_meldungen", lambda: meldungen)
+        return tracker.run()
+
+    def m(mid, datum):
+        return {"id": mid, "kategorie": "", "betreff": "Abfall - Sperrmüll",
+                "bezirk": "Mitte", "lat": 52.5, "lon": 13.4, "status": "offen",
+                "erstellungsDatum": datum, "strasse": "Teststr", "plz": "10115"}
+
+    # Erster Lauf: zwei Meldungen, die aeltere vom 01.03.2025
+    assert lauf([m("alt", "01.03.2025"), m("neu", "01.06.2026")]) == 0
+    conn = sqlite3.connect(db)
+    cid = tracker.cluster_id(52.5, 13.4)
+    vorher = conn.execute("SELECT first_seen FROM hotspots WHERE cluster_id=?",
+                          (cid,)).fetchone()[0]
+    assert vorher == "2025-03-01"
+
+    # Die aelteste Meldung faellt weg, zwei neue kommen dazu (die Zelle muss die
+    # Persistenz-Schwelle weiter erreichen).
+    conn.execute("DELETE FROM meldungen WHERE id='alt'")
+    conn.commit()
+    conn.close()
+
+    assert lauf([m("neu", "01.06.2026"), m("neu2", "02.06.2026")]) == 0
+
+    conn = sqlite3.connect(db)
+    nachher = conn.execute("SELECT first_seen FROM hotspots WHERE cluster_id=?",
+                           (cid,)).fetchone()[0]
+    assert nachher == "2026-06-01", (
+        f"first_seen steht noch auf {nachher!r}. Das Meldedatum der geloeschten "
+        f"Meldung ueberlebt in der veroeffentlichten Zelle (M-02).")
