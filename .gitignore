@@ -1,0 +1,27 @@
+meldungen.json
+ordnungsamt.db
+ordnungsamt_test_copy.db
+*.log
+.venv/
+__pycache__/
+.pytest_cache/
+.claude/
+files.zip
+.git.backup-*/
+assets/screenshots/
+"Muell_Monitor_Broschüre_final.docx"
+Muell_Monitor_Broschuere_final.docx
+*.bak
+*.bak-*
+
+# Wartungs-Lock-Freigabe (Rev H-01 / T-23): Dieser Marker schaltet die Live-Seite
+# frei und darf NIEMALS committet werden. Bewusst gitignored, damit jeder frische
+# Klon (Pi, GitHub-Actions) im Default auf Wartung bleibt (fail-safe). Live schalten
+# = Datei bewusst auf dem Publish-Host anlegen; sperren = Datei dort loeschen.
+LIVE_FREIGEGEBEN
+
+# Sperrliste nach Art. 21 DSGVO (A-7): Zweitschrift der gesperrten Ortszellen.
+# Gehoert NICHT ins oeffentliche Repository — eine Liste der ausgenommenen Zellen
+# liesse sich gegen die Karte halten und wuerde offenlegen, wo jemand
+# widersprochen hat. Beim Rechnerwechsel von Hand mitnehmen.
+sperrliste.txt

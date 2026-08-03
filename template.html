@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Müll-Hotspot Monitor Berlin</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
+<link rel="icon" type="image/x-icon" href="assets/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
+<meta property="og:title" content="Müll-Hotspot Monitor · Berlin">
+<meta property="og:description" content="Tagesaktuelle Karte chronischer Müll-Hotspots in Berlin – aus offenen Ordnungsamt-Daten.">
+<meta property="og:image" content="https://muell-monitor.de/assets/og-card.png">
+<meta property="og:url" content="https://muell-monitor.de/">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://muell-monitor.de/assets/og-card.png">
+<!-- A-12 (DSFA 28.07.2026): Bibliotheken und Schriften werden lokal ausgeliefert.
+     Vorher luden sie von cdnjs.cloudflare.com und fonts.googleapis.com nach; beide
+     Anbieter bekamen dadurch die IP-Adresse jedes Besuchers (Risiko R-9), ohne dass
+     das für den Zweck nötig war. Beschafft mit vendor_assets.py, Prüfsummen mit
+     sri.py. Extern bleiben nur die Kartenkacheln der OpenStreetMap Foundation —
+     die lassen sich nicht mitliefern.
+     Die Richtlinie unten erlaubt genau das und sonst nichts. 'unsafe-inline' ist
+     nötig, weil Stil und Anwendungscode dieser Seite eingebettet sind; für den
+     Zweck der Maßnahme (keine Verbindung zu Dritten) ist das ohne Belang. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: https://*.tile.openstreetmap.org; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="assets/vendor/leaflet/leaflet.min.css" integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous"/>
+<script src="assets/vendor/leaflet/leaflet.min.js" integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="assets/vendor/markercluster/MarkerCluster.css" integrity="sha384-pmjIAcz2bAn0xukfxADbZIb3t8oRT9Sv0rvO+BR5Csr6Dhqq+nZs59P0pPKQJkEV" crossorigin="anonymous"/>
+<link rel="stylesheet" href="assets/vendor/markercluster/MarkerCluster.Default.css" integrity="sha384-wgw+aLYNQ7dlhK47ZPK7FRACiq7ROZwgFNg0m04avm4CaXS+Z9Y7nMu8yNjBKYC+" crossorigin="anonymous"/>
+<script src="assets/vendor/markercluster/leaflet.markercluster.min.js" integrity="sha384-SIh+qcEBNMda8tT+rx66aCBuWtVYMVzRABqhK4eeQh4pjDHoRdVx8nYU4LQ5eGzI" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="assets/vendor/fonts/source-sans-3.css" integrity="sha384-ONNk8xuqWlFyUtxP9n++CkO8148mrkgaQHyGLNv7W3yUfztAKacI/QwtzaYrdr6u" crossorigin="anonymous"/>
+<style>
+:root{
+  --red:#d62828;--gray:#525252;--light:#f4f4f4;--border:#d0d0d0;--white:#fff;
+  --c-niedrig:#2d7d2d;--c-mittel:#8a6200;--c-hoch:#a34000;--c-kritisch:#be0000;
+  --header-h:56px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Source Sans 3',Arial,sans-serif;background:var(--light);color:var(--gray);
+  height:100vh;display:flex;flex-direction:column;overflow:hidden;font-size:14px;
+  -webkit-tap-highlight-color:transparent}
+
+/* HEADER */
+.header{background:var(--red);height:var(--header-h);display:flex;align-items:center;
+  justify-content:space-between;padding:0 16px;flex-shrink:0;
+  box-shadow:0 2px 5px rgba(0,0,0,.25);z-index:200}
+.hdr-left{display:flex;align-items:center;gap:12px}
+.app-icon{height:42px;width:auto;flex-shrink:0;display:block}
+.hdr-title{color:white;font-size:15px;font-weight:700}
+.hdr-stats{display:flex;gap:2px}
+.hst{background:rgba(255,255,255,.15);border-radius:3px;padding:3px 9px;
+  text-align:center;color:white;min-width:50px}
+.hst-v{font-size:16px;font-weight:700;line-height:1}
+.hst-l{font-size:9px;opacity:.8;text-transform:uppercase;letter-spacing:.3px}
+.hst.dk{background:rgba(0,0,0,.2)}
+
+/* LAYOUT */
+.main{display:flex;flex:1;overflow:hidden;position:relative}
+#map{flex:1;z-index:1}
+
+/* SIDEBAR — Desktop */
+.sidebar{width:360px;background:white;border-left:1px solid var(--border);
+  display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;z-index:2}
+
+/* FILTER PANEL */
+.filters{background:var(--light);border-bottom:2px solid var(--red);
+  padding:8px 12px;flex-shrink:0}
+.fr{display:flex;align-items:flex-start;gap:7px;margin-bottom:6px}
+.fr:last-child{margin-bottom:0}
+.fl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;
+  color:#777;min-width:52px;flex-shrink:0;padding-top:3px}
+.fr-right{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
+select.fs{width:100%;padding:4px 22px 4px 7px;border:1px solid var(--border);
+  border-radius:2px;font-size:12px;font-family:inherit;
+  background:white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23777'/%3E%3C/svg%3E") no-repeat right 7px center;
+  appearance:none;color:var(--gray)}
+select.fs:focus{outline:2px solid var(--red)}
+
+/* FILTER CHIPS — multi-select */
+.chips{display:flex;gap:4px;flex-wrap:wrap}
+.chip{padding:3px 9px;border-radius:12px;font-size:11px;font-weight:600;
+  cursor:pointer;border:1.5px solid;background:transparent;
+  font-family:inherit;transition:all .12s;white-space:nowrap;user-select:none}
+/* Einstufung chips */
+.chip[data-t="lvl"][data-v="niedrig"]{border-color:var(--c-niedrig);color:var(--c-niedrig)}
+.chip[data-t="lvl"][data-v="mittel"]{border-color:var(--c-mittel);color:var(--c-mittel)}
+.chip[data-t="lvl"][data-v="hoch"]{border-color:var(--c-hoch);color:var(--c-hoch)}
+.chip[data-t="lvl"][data-v="kritisch"]{border-color:var(--c-kritisch);color:var(--c-kritisch)}
+.chip[data-t="lvl"].on[data-v="niedrig"]{background:var(--c-niedrig);color:white}
+.chip[data-t="lvl"].on[data-v="mittel"]{background:var(--c-mittel);color:white}
+.chip[data-t="lvl"].on[data-v="hoch"]{background:var(--c-hoch);color:white}
+.chip[data-t="lvl"].on[data-v="kritisch"]{background:var(--c-kritisch);color:white}
+/* Abfallart chips */
+.chip[data-t="kat"]{border-color:#bbb;color:#666}
+.chip[data-t="kat"].on{background:var(--gray);color:white;border-color:var(--gray)}
+/* Sort chips */
+.chip[data-t="srt"]{border-color:#bbb;color:#777;font-size:11px}
+.chip[data-t="srt"].on{background:var(--red);color:white;border-color:var(--red)}
+
+.filter-actions{display:flex;justify-content:space-between;align-items:center;margin-top:4px}
+.rcount{font-size:11px;color:#999}
+.clear-btn{font-size:11px;color:var(--red);cursor:pointer;font-weight:600;
+  border:none;background:none;font-family:inherit;padding:0}
+.clear-btn:hover{text-decoration:underline}
+
+/* TABS */
+.tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0;background:white}
+.tab{flex:1;padding:9px 4px;text-align:center;font-size:11px;font-weight:700;
+  cursor:pointer;color:#999;border-bottom:3px solid transparent;
+  transition:all .15s;text-transform:uppercase;letter-spacing:.4px}
+.tab.on{color:var(--red);border-bottom-color:var(--red)}
+.tab:hover:not(.on){background:var(--light)}
+.panel{display:none;flex:1;overflow-y:auto;flex-direction:column}
+.panel.on{display:flex}
+.panel::-webkit-scrollbar{width:4px}
+.panel::-webkit-scrollbar-thumb{background:#ccc;border-radius:2px}
+
+/* PROGNOSE */
+.prog-head{padding:10px 12px;background:var(--light);border-bottom:1px solid var(--border)}
+.ph-date{font-size:13px;font-weight:700;color:var(--gray)}
+.ph-sub{font-size:11px;color:#888;margin-top:2px}
+.prog-tabs{display:flex;gap:4px;padding:8px 12px 4px;background:white;
+  border-bottom:1px solid var(--border)}
+.ptab{flex:1;padding:5px 4px;font-size:11px;font-weight:600;cursor:pointer;
+  background:transparent;border:1px solid var(--border);border-radius:3px;
+  color:#777;font-family:inherit;transition:all .12s}
+.ptab.on{background:var(--red);color:white;border-color:var(--red)}
+.ptab:hover:not(.on){background:var(--light)}
+.plist{padding:7px;display:flex;flex-direction:column;gap:5px}
+.pcard{background:white;border:1px solid var(--border);border-radius:3px;
+  padding:8px 10px;cursor:pointer;transition:border-color .12s}
+.pcard:hover{border-color:var(--red)}
+.pc-row1{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+.pc-prob{display:inline-block;color:white;font-weight:700;font-size:12px;
+  padding:2px 7px;border-radius:10px;min-width:42px;text-align:center}
+.pc-bezirk{font-weight:600;font-size:12px;color:var(--gray);flex:1}
+.pc-meld{font-size:10px;color:#888}
+.pc-strasse{font-size:12px;color:var(--gray);margin-bottom:2px}
+.pc-grund{font-size:11px;color:#777;line-height:1.4}
+.prog-empty{padding:30px 20px;text-align:center;color:#999;font-size:13px}
+.prog-empty-sub{font-size:11px;color:#aaa;margin-top:8px;line-height:1.5}
+
+/* HOTSPOT CARDS */
+.hlist{padding:7px;display:flex;flex-direction:column;gap:4px}
+.hcard{background:white;border:1px solid var(--border);border-left:4px solid;
+  border-radius:2px;cursor:pointer;overflow:hidden;transition:border-color .12s}
+.hcard[data-l="niedrig"]{border-left-color:var(--c-niedrig)}
+.hcard[data-l="mittel"]{border-left-color:var(--c-mittel)}
+.hcard[data-l="hoch"]{border-left-color:var(--c-hoch)}
+.hcard[data-l="kritisch"]{border-left-color:var(--c-kritisch)}
+.hcard.sel{border-color:var(--red);background:#fff8f8}
+.hcard:active{background:#fafafa}
+
+/* Card head — immer sichtbar */
+.hc-head{display:flex;justify-content:space-between;align-items:flex-start;
+  padding:9px 10px;gap:8px}
+.hc-main{flex:1;min-width:0}
+.hc-bez{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;margin-bottom:2px}
+.hc-addr{font-size:11px;color:#888;margin-bottom:3px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.hc-meta{display:flex;gap:8px;flex-wrap:wrap}
+.hc-m{font-size:11px;color:#999}
+.hc-m strong{color:var(--gray)}
+.hc-topcats{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
+.hc-catbadge{font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;color:white}
+.hc-right{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
+.hc-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:2px;
+  color:white;text-transform:uppercase}
+.bg-n{background:var(--c-niedrig)}.bg-m{background:var(--c-mittel)}
+.bg-h{background:var(--c-hoch)}.bg-k{background:var(--c-kritisch)}
+.hc-flag{font-size:9px;color:var(--red);font-weight:700}
+.hc-chevron{font-size:11px;color:#ccc;transition:transform .2s;line-height:1}
+.hcard.open .hc-chevron{transform:rotate(180deg)}
+
+/* Card detail — aufklappbar */
+.hc-det{display:none;padding:0 10px 10px;border-top:1px solid #f5f5f5}
+.hcard.open .hc-det{display:block}
+.det-sec{margin-top:8px}
+.det-lbl{font-size:10px;color:#aaa;text-transform:uppercase;
+  letter-spacing:.4px;margin-bottom:4px;font-weight:600}
+.kat-pills{display:flex;gap:3px;flex-wrap:wrap}
+.kp{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;
+  border-radius:10px;font-size:11px;font-weight:600;color:white}
+.kp-pct{opacity:.75;font-size:10px}
+/* Wochentag-Chart — feste Höhe, kein Overflow */
+.wd-chart{display:flex;gap:3px;height:36px}
+.wd-col{display:flex;flex-direction:column;align-items:center;
+  justify-content:flex-end;flex:1;gap:2px;min-width:0}
+.wd-bar{width:100%;border-radius:1px 1px 0 0;flex-shrink:0}
+.wd-lbl{font-size:8px;font-weight:700;color:#ccc;line-height:1;flex-shrink:0}
+.wd-lbl.mo{color:var(--red)}.wd-lbl.wk{color:#7b3fa0}
+.pat-tag{display:inline-block;font-size:10px;font-weight:700;
+  padding:2px 8px;border-radius:8px;margin-bottom:4px}
+.pt-mo{background:#e8f0ff;color:#0033aa}
+.pt-wk{background:#f0e8ff;color:#660099}
+.auf-list{display:flex;flex-direction:column;gap:2px}
+.auf-i{font-size:11px;color:#555;line-height:1.5;
+  padding:3px 0 3px 12px;position:relative}
+.auf-i::before{content:'·';position:absolute;left:3px;color:var(--red);font-weight:700}
+.sbar{height:3px;background:#eee;border-radius:1px;margin-top:8px}
+.sfill{height:100%;border-radius:1px}
+.det-dates{font-size:10px;color:#bbb;margin-top:5px}
+
+/* BEZIRK */
+.blist{padding:7px;display:flex;flex-direction:column;gap:4px}
+.bcard{background:white;border:1px solid var(--border);border-radius:2px;padding:10px 12px}
+.bc-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.bc-name{font-size:13px;font-weight:700}
+.bc-scr{font-size:10px;font-weight:700;padding:2px 7px;border-radius:2px;color:white}
+.bc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:5px}
+.bc-i{text-align:center}
+.bc-v{font-size:15px;font-weight:700}
+.bc-l{font-size:9px;color:#aaa;text-transform:uppercase}
+.bc-bar{height:3px;background:#eee}.bc-fill{height:100%}
+
+/* INFO */
+.isec{padding:12px 14px;border-bottom:1px solid var(--border)}
+.isec h3{font-size:11px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.5px;color:var(--red);margin-bottom:7px}
+.leg-row{display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:12px}
+.leg-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0}
+.li{display:flex;gap:7px;margin-bottom:6px;font-size:12px;color:#555;line-height:1.4}
+.ln{color:var(--red);font-weight:700;flex-shrink:0;min-width:20px}
+
+/* POPUP */
+.leaflet-popup-content-wrapper{border-radius:3px!important;
+  box-shadow:0 4px 16px rgba(0,0,0,.2)!important;padding:0!important;overflow:hidden}
+.leaflet-popup-content{margin:0!important;width:280px!important}
+.pop-hd{background:var(--red);color:white;padding:9px 13px}
+.pop-ti{font-size:13px;font-weight:700;line-height:1.2}
+.pop-su{font-size:11px;opacity:.85;margin-top:2px}
+.pop-bd{padding:10px 13px}
+.pop-addr{font-size:12px;color:#555;margin-bottom:8px;padding-bottom:7px;
+  border-bottom:1px solid #f0f0f0}
+.pop-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.pop-l{font-size:10px;color:#999;text-transform:uppercase;letter-spacing:.3px}
+.pop-v{font-size:13px;font-weight:700}
+.pop-kats{margin-bottom:8px}
+.pop-auf{margin-top:4px;padding-top:7px;border-top:1px solid #f0f0f0}
+.leaflet-popup-tip{display:none}
+.leaflet-container{background:#e8e0d8!important}
+.leaflet-control-zoom a{color:var(--gray)!important;font-weight:700!important}
+.leaflet-control-attribution{font-size:9px!important}
+
+/* ══ MOBILE BOTTOM SHEET ══ */
+@media(max-width:768px){
+  .hdr-stats .hst:nth-child(n+3){display:none}
+  .main{overflow:visible}
+  #map{position:absolute;inset:0;z-index:1}
+  .sidebar{
+    position:absolute;left:0;right:0;bottom:0;width:100%;
+    border-left:none;border-top:none;border-radius:16px 16px 0 0;
+    box-shadow:0 -4px 20px rgba(0,0,0,.15);
+    height:92vh;
+    transform:translateY(calc(100% - 180px));
+    transition:transform .3s cubic-bezier(.32,.72,0,1);
+    z-index:100;
+  }
+  .sidebar.s-mid{transform:translateY(calc(100% - 52vh))}
+  .sidebar.s-full{transform:translateY(8vh)}
+  .sh-handle{
+    background:white;border-radius:16px 16px 0 0;
+    padding:10px 0 4px;text-align:center;
+    flex-shrink:0;cursor:pointer;touch-action:none;user-select:none;
+  }
+  .sh-handle::after{content:'';display:inline-block;
+    width:36px;height:4px;background:#ddd;border-radius:2px}
+  .filters{padding:6px 10px}
+  .fr{margin-bottom:4px;gap:5px}
+  .fl{min-width:40px;font-size:9px}
+  .chip{font-size:10px;padding:6px 11px;min-height:32px;touch-action:manipulation}
+  .tabs .tab{font-size:10px;padding:8px 2px}
+  /* Karten-Karte auf Mobile: volle Breite, tappable */
+  .hcard{touch-action:manipulation}
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="hdr-left">
+    <img class="app-icon" src="assets/icon_white.png" alt="Müll-Monitor">
+    <div class="hdr-title">Müll-Hotspot Monitor · Berlin</div>
+  </div>
+  <div class="hdr-stats" id="hStats"></div>
+</div>
+
+<div class="main">
+  <div id="map"></div>
+  <div class="sidebar" id="sheet">
+    <div class="sh-handle" id="shHandle"></div>
+
+    <!-- FILTER -->
+    <div class="filters">
+      <div class="fr">
+        <span class="fl">Bezirk</span>
+        <div class="fr-right">
+          <select class="fs" id="fBezirk" onchange="applyFilters()">
+            <option value="">Alle Bezirke</option>
+          </select>
+        </div>
+      </div>
+      <div class="fr">
+        <span class="fl">Einstufung</span>
+        <div class="fr-right">
+          <div class="chips" id="lvlChips">
+            <span class="chip" data-t="lvl" data-v="kritisch" onclick="toggleChip(this)">Kritisch</span>
+            <span class="chip" data-t="lvl" data-v="hoch" onclick="toggleChip(this)">Hoch</span>
+            <span class="chip" data-t="lvl" data-v="mittel" onclick="toggleChip(this)">Mittel</span>
+            <span class="chip" data-t="lvl" data-v="niedrig" onclick="toggleChip(this)">Niedrig</span>
+          </div>
+        </div>
+      </div>
+      <div class="fr">
+        <span class="fl">Abfallart</span>
+        <div class="fr-right">
+          <div class="chips" id="katChips"></div>
+        </div>
+      </div>
+      <div class="fr">
+        <span class="fl">Sortierung</span>
+        <div class="fr-right">
+          <div class="chips">
+            <span class="chip on" data-t="srt" data-v="score_desc" onclick="setSort(this)">▼ Bewertung</span>
+            <span class="chip" data-t="srt" data-v="score_asc" onclick="setSort(this)">▲ Bewertung</span>
+            <span class="chip" data-t="srt" data-v="meldungen" onclick="setSort(this)">Meldungen</span>
+            <span class="chip" data-t="srt" data-v="datum" onclick="setSort(this)">Aktuellste</span>
+          </div>
+        </div>
+      </div>
+      <div class="filter-actions">
+        <span class="rcount" id="rCount"></span>
+        <button class="clear-btn" onclick="clearFilters()">Filter zurücksetzen</button>
+      </div>
+    </div>
+
+    <!-- TABS -->
+    <div class="tabs">
+      <div class="tab on" onclick="switchTab('hotspots')">Standorte</div>
+      <div class="tab" onclick="switchTab('bezirke')">Bezirke</div>
+      <div class="tab" onclick="switchTab('prognose')">Prognose</div>
+      <div class="tab" onclick="switchTab('info')">Legende</div>
+    </div>
+    <div class="panel on" id="panel-hotspots"><div class="hlist" id="hList"></div></div>
+    <div class="panel" id="panel-bezirke"><div class="blist" id="bList"></div></div>
+    <div class="panel" id="panel-prognose">
+      <div class="prog-head" id="pHead"></div>
+      <div class="prog-tabs">
+        <button class="ptab on" data-prog="heute" onclick="switchProg('heute')">Heute</button>
+        <button class="ptab" data-prog="woche" onclick="switchProg('woche')">Diese Woche</button>
+        <button class="ptab" data-prog="monat" onclick="switchProg('monat')">Dieser Monat</button>
+      </div>
+      <div class="plist" id="pList"></div>
+    </div>
+    <div class="panel" id="panel-info">
+      <div class="isec"><h3>Einstufungssystem</h3>
+        <div class="leg-row"><div class="leg-dot" style="background:var(--c-niedrig)"></div><strong style="color:var(--c-niedrig)">Niedrig (0–3)</strong> — Einzelmeldung</div>
+        <div class="leg-row"><div class="leg-dot" style="background:var(--c-mittel)"></div><strong style="color:var(--c-mittel)">Mittel (4–7)</strong> — Gelegentliche Häufung</div>
+        <div class="leg-row"><div class="leg-dot" style="background:var(--c-hoch)"></div><strong style="color:var(--c-hoch)">Hoch (8–12)</strong> — Wiederholungsmuster</div>
+        <div class="leg-row"><div class="leg-dot" style="background:var(--c-kritisch)"></div><strong style="color:var(--c-kritisch)">Kritisch (13+)</strong> — Dauerhafter Problemstandort</div>
+      </div>
+      <div class="isec"><h3>Abfallarten</h3>
+        <div class="li"><span class="ln">🏗</span>Bauschutt — gewerbliche Herkunft wahrscheinlich</div>
+        <div class="li"><span class="ln">🌿</span>Grünschnitt/Gartenabfall — Garten- oder Kleingartenanlagen</div>
+        <div class="li"><span class="ln">🚗</span>Schrottfahrzeug — Verstoß gegen FZV</div>
+        <div class="li"><span class="ln">🛋</span>Sperrmüll — Umgehung regulärer Entsorgungswege</div>
+        <div class="li"><span class="ln">⚡</span>Elektroschrott — Verstoß gegen ElektroG</div>
+        <div class="li"><span class="ln">🚮</span>Illegale Entsorgung — Ordnungswidrigkeit §61 KrWG</div>
+      </div>
+      <div class="isec"><h3>Zeitliche Auswertung</h3>
+        <div class="li"><span class="ln" style="color:var(--red)">Mo</span>Montags-Schwerpunkt → Ablagerung am Wochenende</div>
+        <div class="li"><span class="ln" style="color:#7b3fa0">Sa/So</span>Wochenend-Schwerpunkt → außerhalb der Werktage</div>
+        <div class="li"><span class="ln">📅</span>Monatsendhäufung → Zusammenhang mit Wohnungswechseln</div>
+        <div class="li"><span class="ln">🌸</span>Saisonale Häufung → jahreszeittypisches Muster</div>
+      </div>
+      <div class="isec"><h3>Bewertungsberechnung</h3>
+        <div class="li"><span class="ln">+1</span>Pro Meldung an diesem Standort</div>
+        <div class="li"><span class="ln">+3</span>Folgemeldung innerhalb 21 Tagen nach Beseitigung</div>
+        <div class="li"><span class="ln">×</span>Zeitfaktor: aktuellere Standorte höher gewichtet</div>
+      </div>
+      <div class="isec"><h3>Datengrundlage</h3>
+        <p style="font-size:12px;color:#666;line-height:1.6">Ordnungsamt Online API · Berlin Open Data<br>Datenlizenz Deutschland – Namensnennung 2.0<br>Tagesaktuelle Aktualisierung</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const D = __APP_DATA_PLACEHOLDER__;
+const DAYS = ['Mo','Di','Mi','Do','Fr','Sa','So'];
+const COLORS = {niedrig:'#2d7d2d',mittel:'#8a6200',hoch:'#a34000',kritisch:'#be0000'};
+
+// HTML-Escaping für User-Daten (API-Input) in innerHTML-Kontexten (C-04)
+function esc(s){ const t=document.createElement('span'); t.textContent=String(s||''); return t.innerHTML; }
+
+// ── Filter State ───────────────────────────────────────────────────────
+// Alle Filter sind MULTI-SELECT Arrays, leeres Array = kein Filter
+let F = { bezirk:'', levels:[], kats:[], sort:'score_desc' };
+let markers = [], map, openCard = null;
+
+// ── Filter Logik ───────────────────────────────────────────────────────
+function filteredHotspots(){
+  let hs = D.hotspots.slice();
+  // Nur echte Hotspots anzeigen (mind. 3 Meldungen)
+  hs = hs.filter(h => h.meldungen_count >= 3);
+  if(F.bezirk) hs = hs.filter(h => h.bezirk === F.bezirk);
+  if(F.levels.length) hs = hs.filter(h => F.levels.includes(h.score_label));
+  if(F.kats.length) hs = hs.filter(h => (h.kategorie_mix||[]).some(k => F.kats.includes(k.key)));
+  hs.sort((a,b)=>{
+    if(F.sort==='score_desc') return b.score-a.score;
+    if(F.sort==='score_asc')  return a.score-b.score;
+    if(F.sort==='meldungen')  return b.meldungen_count-a.meldungen_count;
+    if(F.sort==='datum')      return (b.last_seen||'').localeCompare(a.last_seen||'');
+    return 0;
+  });
+  return hs;
+}
+
+function applyFilters(){
+  F.bezirk = document.getElementById('fBezirk').value;
+  renderMarkers();
+  renderHList();
+}
+
+function toggleChip(el){
+  const t = el.dataset.t, v = el.dataset.v;
+  if(t === 'lvl'){
+    el.classList.toggle('on');
+    F.levels = [...document.querySelectorAll('.chip[data-t="lvl"].on')].map(c=>c.dataset.v);
+  } else if(t === 'kat'){
+    el.classList.toggle('on');
+    F.kats = [...document.querySelectorAll('.chip[data-t="kat"].on')].map(c=>c.dataset.v);
+  }
+  renderMarkers();
+  renderHList();
+}
+
+function setSort(el){
+  document.querySelectorAll('.chip[data-t="srt"]').forEach(c=>c.classList.remove('on'));
+  el.classList.add('on');
+  F.sort = el.dataset.v;
+  renderHList();
+}
+
+function clearFilters(){
+  F = { bezirk:'', levels:[], kats:[], sort:'score_desc' };
+  document.getElementById('fBezirk').value = '';
+  document.querySelectorAll('.chip[data-t="lvl"], .chip[data-t="kat"]').forEach(c=>c.classList.remove('on'));
+  document.querySelectorAll('.chip[data-t="srt"]').forEach(c=>c.classList.remove('on'));
+  document.querySelector('.chip[data-t="srt"][data-v="score_desc"]').classList.add('on');
+  renderMarkers();
+  renderHList();
+}
+
+// ── Map ────────────────────────────────────────────────────────────────
+let clusterGroup = null;
+
+function initMap(){
+  map = L.map('map',{center:[52.52,13.405],zoom:11});
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    attribution:'© OpenStreetMap',maxZoom:19}).addTo(map);
+  renderMarkers();
+  map.on('click', ()=>{ if(isMobile() && sheetState!=='peek') setSheet('peek'); });
+}
+
+function isMobile(){ return window.innerWidth <= 768; }
+
+function makeIcon(level){
+  const c=COLORS[level], r={niedrig:8,mittel:11,hoch:15,kritisch:20}[level];
+  const sz=r*2+10, cx=sz/2;
+  const pulse = level==='kritisch'
+    ? `<circle cx="${cx}" cy="${cx}" r="${r+5}" fill="none" stroke="${c}" stroke-width="1" opacity="0.3">
+        <animate attributeName="r" values="${r+2};${r+9};${r+2}" dur="2.5s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.4;0;0.4" dur="2.5s" repeatCount="indefinite"/>
+       </circle>` : '';
+  const svg = `<svg width="${sz}" height="${sz}" xmlns="http://www.w3.org/2000/svg">
+    ${pulse}
+    <circle cx="${cx}" cy="${cx}" r="${r}" fill="${c}" fill-opacity=".85" stroke="white" stroke-width="1.5"/>
+  </svg>`;
+  return L.divIcon({html:svg,className:'',iconSize:[sz,sz],iconAnchor:[cx,cx],popupAnchor:[0,-cx]});
+}
+
+function renderMarkers(){
+  // Alten Cluster-Layer entfernen
+  if(clusterGroup) { map.removeLayer(clusterGroup); }
+  markers = [];
+
+  clusterGroup = L.markerClusterGroup({
+    maxClusterRadius: 50,
+    spiderfyOnMaxZoom: true,
+    showCoverageOnHover: false,
+    zoomToBoundsOnClick: true,
+    iconCreateFunction: function(cluster) {
+      const children = cluster.getAllChildMarkers();
+      // Höchste Einstufung im Cluster bestimmen
+      const levels = ['kritisch','hoch','mittel','niedrig'];
+      let topLevel = 'niedrig';
+      for(const m of children){
+        const lvl = m._level || 'niedrig';
+        if(levels.indexOf(lvl) < levels.indexOf(topLevel)) topLevel = lvl;
+      }
+      const c = COLORS[topLevel];
+      const count = cluster.getChildCount();
+      const size = count > 100 ? 44 : count > 20 ? 36 : 28;
+      return L.divIcon({
+        html: `<div style="width:${size}px;height:${size}px;border-radius:50%;
+          background:${c};color:white;display:flex;align-items:center;
+          justify-content:center;font-weight:700;font-size:${size>36?13:11}px;
+          border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,.3)">${count}</div>`,
+        className: '',
+        iconSize: [size, size],
+        iconAnchor: [size/2, size/2]
+      });
+    }
+  });
+
+  filteredHotspots().forEach(h=>{
+    const m = L.marker([h.lat_center,h.lon_center],{icon:makeIcon(h.score_label)});
+    m._cid = h.cluster_id;
+    m._level = h.score_label;
+    m.on('click', ()=>{
+      showPopup(h);
+      highlightCard(h.cluster_id);
+      // Sheet bei Marker-Klick NICHT hochziehen — Nutzer soll Karte sehen
+    });
+    markers.push(m);
+    clusterGroup.addLayer(m);
+  });
+
+  map.addLayer(clusterGroup);
+}
+
+// ── Popup (volle Details) ──────────────────────────────────────────────
+function makePopupHTML(h){
+  const c = COLORS[h.score_label];
+  const kats = (h.kategorie_mix||[]).map(k=>
+    `<span style="display:inline-flex;gap:2px;background:${k.color};color:white;
+      padding:2px 7px;border-radius:8px;font-size:11px;font-weight:600;margin:1px">
+      ${k.label} <span style="opacity:.7;font-size:10px">${k.pct}%</span></span>`
+  ).join('');
+
+  const _popWd = h.weekday_dist||{}, _popMaxWd=Math.max(...Object.values(_popWd),1);
+  const wdHTML = DAYS.map(d=>{
+    const val=_popWd[d]||0, hp=Math.max(2,Math.round((val/_popMaxWd)*22));
+    const bc = d==='Mo'?'#be0000':(d==='Sa'||d==='So'?'#7b3fa0':'#99b8d8');
+    const lc = d==='Mo'?'color:#be0000':(d==='Sa'||d==='So'?'color:#7b3fa0':'color:#bbb');
+    return `<div style="display:flex;flex-direction:column;align-items:center;
+      justify-content:flex-end;flex:1;gap:2px;min-height:36px">
+      <div style="width:100%;background:${bc};height:${hp}px;border-radius:1px 1px 0 0;flex-shrink:0"></div>
+      <span style="font-size:7px;font-weight:700;${lc};line-height:1;flex-shrink:0">${d}</span>
+    </div>`;
+  }).join('');
+
+  const auf = (h.auffaelligkeiten||[]).map(a=>
+    `<div style="font-size:11px;color:#555;padding:2px 0 2px 10px;position:relative;line-height:1.4;border-bottom:1px solid #f5f5f5">
+      <span style="position:absolute;left:0;color:var(--red);font-weight:700">·</span>${esc(a)}
+    </div>`
+  ).join('');
+
+  const addrLine = h.strasse
+    ? `📍 ${[h.strasse,h.plz,h.bezirk].filter(Boolean).map(esc).join(' · ')}`
+    : `📍 ${esc(h.bezirk||'Unbekannt')}`;
+
+  const maxScore=30, scorePct=Math.min(100,(h.score/maxScore)*100).toFixed(0);
+
+  return `
+  <div class="pop-hd">
+    <div class="pop-ti">${esc(h.bezirk||'Unbekannt')} · ${h.score_label.charAt(0).toUpperCase()+h.score_label.slice(1)}</div>
+    <div class="pop-su">Bewertung ${h.score}</div>
+  </div>
+  <div class="pop-bd">
+    <div class="pop-addr">${addrLine}</div>
+    <div class="pop-grid">
+      <div><div class="pop-l">Meldungen</div><div class="pop-v">${h.meldungen_count}</div></div>
+      <div><div class="pop-l">Wiederkehr</div><div class="pop-v">${h.recurrence_count}×</div></div>
+      <div><div class="pop-l">Erstmeldung</div><div class="pop-v" style="font-size:11px">${esc(h.first_seen)}</div></div>
+      <div><div class="pop-l">Letzte Meldung</div><div class="pop-v" style="font-size:11px">${esc(h.last_seen)}</div></div>
+    </div>
+    ${kats?`<div class="pop-kats"><div class="pop-l" style="margin-bottom:4px">Abfallarten</div>
+      <div style="display:flex;flex-wrap:wrap;gap:2px">${kats}</div></div>`:''}
+    <div style="margin:7px 0 4px"><div class="pop-l" style="margin-bottom:3px">Wochentag</div>
+      <div style="display:flex;gap:2px;align-items:flex-end;min-height:36px">${wdHTML}</div></div>
+    <div style="height:3px;background:#eee;border-radius:1px;margin-bottom:6px">
+      <div style="width:${scorePct}%;height:100%;background:${c};border-radius:1px"></div></div>
+    ${auf?`<div class="pop-auf"><div class="pop-l" style="margin-bottom:4px">Feststellungen</div>${auf}</div>`:''}
+  </div>`;
+}
+
+function showPopup(h){
+  markers.forEach(m=>{
+    if(m._cid === h.cluster_id){
+      m.bindPopup(makePopupHTML(h),{maxWidth:300,className:''}).openPopup();
+    }
+  });
+}
+
+// ── Card Interaktion ───────────────────────────────────────────────────
+function highlightCard(cid){
+  document.querySelectorAll('.hcard').forEach(el=>{
+    el.classList.toggle('sel', el.dataset.cid===cid);
+  });
+  const card = document.querySelector(`.hcard[data-cid="${cid}"]`);
+  if(card) card.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+function toggleCard(cid){
+  // Karten-Klick in Sidebar: aufklappen + Karte zentrieren + Karte in Liste markieren
+  const card = document.querySelector(`.hcard[data-cid="${cid}"]`);
+  const h = D.hotspots.find(x=>x.cluster_id===cid);
+  if(!card || !h) return;
+
+  const wasOpen = card.classList.contains('open');
+
+  // Anderen schließen
+  document.querySelectorAll('.hcard.open').forEach(c=>{ if(c!==card) c.classList.remove('open'); });
+
+  card.classList.toggle('open', !wasOpen);
+  card.classList.add('sel');
+  document.querySelectorAll('.hcard:not([data-cid="'+cid+'"])').forEach(c=>c.classList.remove('sel'));
+
+  // Karte zentrieren + Popup öffnen
+  map.flyTo([h.lat_center, h.lon_center], 14, {duration:0.8});
+  showPopup(h);
+
+  // Mobile: Sheet auf peek damit Karte sichtbar bleibt
+  if(isMobile()) setSheet('peek');
+}
+
+// ── Render Header Stats ────────────────────────────────────────────────
+function renderStats(){
+  const hs=D.hotspots;
+  const krit=hs.filter(h=>h.score_label==='kritisch').length;
+  const hoch=hs.filter(h=>h.score_label==='hoch').length;
+  const total=hs.reduce((s,h)=>s+h.meldungen_count,0);
+  document.getElementById('hStats').innerHTML =
+    `<div class="hst dk"><div class="hst-v">${krit}</div><div class="hst-l">Kritisch</div></div>
+     <div class="hst dk"><div class="hst-v">${hoch}</div><div class="hst-l">Hoch</div></div>
+     <div class="hst"><div class="hst-v">${hs.length}</div><div class="hst-l">Standorte</div></div>
+     <div class="hst"><div class="hst-v">${total}</div><div class="hst-l">Meldungen</div></div>`;
+}
+
+// ── Render Abfallart Chips ─────────────────────────────────────────────
+function renderKatChips(){
+  const kk = D.kategorie_gruppen||{};
+  document.getElementById('katChips').innerHTML = Object.entries(kk).map(([key,info])=>
+    `<span class="chip" data-t="kat" data-v="${key}" onclick="toggleChip(this)"
+      style="border-color:${info.color};color:${info.color}">${info.label}</span>`
+  ).join('');
+}
+
+// ── Render Hotspot List ────────────────────────────────────────────────
+function renderHList(){
+  const hs = filteredHotspots();
+  document.getElementById('rCount').textContent =
+    `${hs.length} Standort${hs.length!==1?'e':''} gefunden`;
+
+  const maxScore = Math.max(...D.hotspots.map(h=>h.score),1);
+
+  document.getElementById('hList').innerHTML = hs.map(h=>{
+    const c = COLORS[h.score_label];
+    const pct = ((h.score/maxScore)*100).toFixed(0);
+    const bgClass = {niedrig:'bg-n',mittel:'bg-m',hoch:'bg-h',kritisch:'bg-k'}[h.score_label];
+
+    // Basis: top-2 Abfallarten als kleine farbige Badges
+    const topCatBadges = (h.kategorie_mix||[]).slice(0,2).map(k=>
+      `<span class="hc-catbadge" style="background:${k.color}">${k.label}</span>`
+    ).join('');
+
+    // Detail: volle Pills
+    const katPills = (h.kategorie_mix||[]).map(k=>
+      `<span class="kp" style="background:${k.color}">${k.label}<span class="kp-pct">${k.pct}%</span></span>`
+    ).join('');
+
+    // Wochentag Chart
+    const wd=h.weekday_dist||{}, maxWd=Math.max(...Object.values(wd),1);
+    const wdBars = DAYS.map(d=>{
+      const val=wd[d]||0, hp=Math.max(2,Math.round((val/maxWd)*20));
+      const bc = d==='Mo'?'var(--red)':(d==='Sa'||d==='So'?'#7b3fa0':'#99b8d8');
+      const lc = d==='Mo'?'mo':(d==='Sa'||d==='So'?'wk':'');
+      return `<div class="wd-col">
+        <div class="wd-bar" style="height:${hp}px;background:${bc}"></div>
+        <span class="wd-lbl ${lc}">${d}</span>
+      </div>`;
+    }).join('');
+
+    const patTag = h.pattern && h.pattern!=='normal'
+      ? `<span class="pat-tag ${h.pattern==='montag'?'pt-mo':'pt-wk'}">
+          ${h.pattern==='montag'?'Montags-Schwerpunkt':'Wochenend-Schwerpunkt'} · ${h.pattern_label}
+        </span>` : '';
+
+    const aufItems = (h.auffaelligkeiten||[]).map(a=>
+      `<div class="auf-i">${esc(a)}</div>`
+    ).join('');
+
+    const hasAuf = (h.auffaelligkeiten||[]).length > 0;
+    const addrLine = h.strasse
+      ? `<div class="hc-addr">📍 ${esc(h.strasse)}${h.plz?' · '+esc(h.plz):''}</div>`
+      : '';
+
+    return `<div class="hcard" data-l="${h.score_label}" data-cid="${esc(h.cluster_id)}"
+      onclick="toggleCard('${esc(h.cluster_id)}')">
+      <div class="hc-head">
+        <div class="hc-main">
+          <div class="hc-bez">${esc(h.bezirk||'Unbekannt')}</div>
+          ${addrLine}
+          <div class="hc-meta">
+            <span class="hc-m"><strong>${h.meldungen_count}</strong> Meld.</span>
+            <span class="hc-m"><strong>${h.recurrence_count}×</strong> Wiederk.</span>
+            <span class="hc-m">Bew. <strong style="color:${c}">${h.score}</strong></span>
+          </div>
+          <div class="hc-topcats">${topCatBadges}</div>
+        </div>
+        <div class="hc-right">
+          <div class="hc-badge ${bgClass}">${h.score_label}</div>
+          ${hasAuf?'<span class="hc-flag">⚑ Festst.</span>':''}
+          <div class="hc-chevron">▼</div>
+        </div>
+      </div>
+      <div class="hc-det">
+        ${katPills?`<div class="det-sec"><div class="det-lbl">Abfallarten</div><div class="kat-pills">${katPills}</div></div>`:''}
+        <div class="det-sec">
+          <div class="det-lbl">Meldeverteilung Wochentag</div>
+          <div class="wd-chart">${wdBars}</div>
+        </div>
+        ${patTag?`<div style="margin-top:5px">${patTag}</div>`:''}
+        ${aufItems?`<div class="det-sec"><div class="det-lbl">Feststellungen</div><div class="auf-list">${aufItems}</div></div>`:''}
+        <div class="sbar"><div class="sfill" style="width:${pct}%;background:${c}"></div></div>
+        <div class="det-dates">Erstmeldung: ${esc(h.first_seen)} · Letzte Meldung: ${esc(h.last_seen)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Render Bezirk List ─────────────────────────────────────────────────
+function renderBList(){
+  const maxScore = Math.max(...D.bezirk_stats.map(b=>b.max_score||0),1);
+  document.getElementById('bList').innerHTML = D.bezirk_stats.map(b=>{
+    const pct = ((b.max_score/maxScore)*100).toFixed(0);
+    let col='#2d7d2d';
+    if(b.max_score>=13) col='#be0000';
+    else if(b.max_score>=8) col='#cc5500';
+    else if(b.max_score>=4) col='#8a6200';
+    return `<div class="bcard">
+      <div class="bc-top">
+        <div class="bc-name">${esc(b.bezirk)}</div>
+        <div class="bc-scr" style="background:${col}">Bewertung ${b.max_score}</div>
+      </div>
+      <div class="bc-grid">
+        <div class="bc-i"><div class="bc-v">${b.total_meldungen}</div><div class="bc-l">Meldungen</div></div>
+        <div class="bc-i"><div class="bc-v">${b.total_hotspots}</div><div class="bc-l">Standorte</div></div>
+        <div class="bc-i"><div class="bc-v" style="color:#be0000">${b.krit||0}</div><div class="bc-l">Kritisch</div></div>
+        <div class="bc-i"><div class="bc-v" style="color:#cc5500">${b.hoch||0}</div><div class="bc-l">Hoch</div></div>
+      </div>
+      <div class="bc-bar"><div class="bc-fill" style="width:${pct}%;background:${col}"></div></div>
+    </div>`;
+  }).join('');
+}
+
+// ── Tab switch ─────────────────────────────────────────────────────────
+function switchTab(name){
+  document.querySelectorAll('.tab').forEach((t,i)=>
+    t.classList.toggle('on',['hotspots','bezirke','prognose','info'][i]===name));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  document.getElementById('panel-'+name).classList.add('on');
+  if(name==='prognose') renderPrognose();
+}
+// Hash-Routing: ?#prognose oeffnet direkt Tab — fuer Screenshots
+if(typeof window!=='undefined' && window.location.hash){
+  const t = window.location.hash.slice(1);
+  if(['hotspots','bezirke','prognose','info'].includes(t))
+    setTimeout(()=>switchTab(t), 100);
+}
+
+// ── Prognose ───────────────────────────────────────────────────────────
+let progTab = 'heute';
+function switchProg(t){
+  progTab = t;
+  document.querySelectorAll('.ptab').forEach(b=>
+    b.classList.toggle('on', b.dataset.prog===t));
+  renderPrognose();
+}
+function renderPrognose(){
+  const P = D.prognose;
+  if(!P){ document.getElementById('pList').innerHTML =
+    '<div class="prog-empty">Keine Prognose-Daten verfügbar</div>'; return; }
+  const head = document.getElementById('pHead');
+  head.innerHTML = `<div class="ph-date">${P.datum} · ${P.wochentag} · KW ${P.kw}</div>
+    <div class="ph-sub">Wahrscheinlichkeit basiert auf historischen Mustern</div>`;
+  const items = P[progTab] || [];
+  const list = document.getElementById('pList');
+  if(!items.length){
+    list.innerHTML = `<div class="prog-empty">
+      Noch keine ${progTab === 'heute' ? 'Heute' : progTab === 'woche' ? 'Wochen' : 'Monats'}-Prognose
+      <div class="prog-empty-sub">Mindestens 5 Meldungen pro Standort und ≥15 % Wahrscheinlichkeit nötig.
+      Auf der Pi-Datenbank mit 100k+ Meldungen liefert das Verfahren typisch 30–50 Treffer.</div>
+    </div>`;
+    return;
+  }
+  list.innerHTML = items.map(p => {
+    const lvlColor = COLORS[p.score_label] || '#888';
+    return `<div class="pcard" data-cid="${esc(p.cluster_id)}" onclick="focusHotspot('${esc(p.cluster_id)}')">
+      <div class="pc-row1">
+        <span class="pc-prob" style="background:${lvlColor}">${p.prob}%</span>
+        <span class="pc-bezirk">${esc(p.bezirk)}</span>
+        <span class="pc-meld">${p.meldungen_count} Meld.</span>
+      </div>
+      <div class="pc-strasse">${esc(p.strasse || '(keine Adresse)')} ${esc(p.plz || '')}</div>
+      <div class="pc-grund">${esc(p.grund)}</div>
+    </div>`;
+  }).join('');
+}
+function focusHotspot(cid){
+  const h = D.hotspots.find(x=>x.cluster_id===cid);
+  if(h && map){ map.setView([h.lat_center, h.lon_center], 17); }
+}
+
+// ── Mobile Bottom Sheet ────────────────────────────────────────────────
+let sheetState='peek', dragY0=null, sheetY0=null;
+const sheet=document.getElementById('sheet');
+const shHandle=document.getElementById('shHandle');
+
+function setSheet(state){
+  sheetState=state;
+  sheet.style.transition='';
+  sheet.classList.remove('s-mid','s-full');
+  if(state==='mid') sheet.classList.add('s-mid');
+  if(state==='full') sheet.classList.add('s-full');
+  setTimeout(()=>{ if(map) map.invalidateSize(); },320);
+}
+
+function shDragStart(e){
+  if(!isMobile()) return;
+  dragY0 = e.touches?e.touches[0].clientY:e.clientY;
+  sheetY0 = sheet.getBoundingClientRect().top;
+  sheet.style.transition='none';
+}
+function shDragMove(e){
+  if(dragY0===null||!isMobile()) return;
+  e.preventDefault();
+  const cur=e.touches?e.touches[0].clientY:e.clientY;
+  const dy=dragY0-cur;
+  const vh=window.innerHeight-parseInt(getComputedStyle(document.documentElement).getPropertyValue('--header-h'));
+  const newH=Math.max(160, Math.min(vh*0.93, (vh-sheetY0)+dy+parseInt(getComputedStyle(document.documentElement).getPropertyValue('--header-h'))));
+  sheet.style.transform=`translateY(calc(100% - ${newH}px))`;
+}
+function shDragEnd(e){
+  if(dragY0===null||!isMobile()) return;
+  sheet.style.transition='';
+  const cur=e.changedTouches?e.changedTouches[0].clientY:e.clientY;
+  const dy=dragY0-cur;
+  if(dy>80) setSheet(sheetState==='peek'?'mid':'full');
+  else if(dy<-80) setSheet(sheetState==='full'?'mid':'peek');
+  else setSheet(sheetState);
+  dragY0=null;
+}
+
+shHandle.addEventListener('touchstart',shDragStart,{passive:true});
+shHandle.addEventListener('touchmove',shDragMove,{passive:false});
+shHandle.addEventListener('touchend',shDragEnd,{passive:true});
+shHandle.addEventListener('click',()=>{
+  if(!isMobile()) return;
+  const states=['peek','mid','full'];
+  setSheet(states[(states.indexOf(sheetState)+1)%3]);
+});
+
+// ── Init ───────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded',()=>{
+  // Bezirk Dropdown
+  const sel=document.getElementById('fBezirk');
+  (D.bezirke||[]).forEach(b=>{
+    const o=document.createElement('option');o.value=b;o.textContent=b;sel.appendChild(o);
+  });
+
+  renderKatChips();
+  initMap();
+  renderStats();
+  renderHList();
+  renderBList();
+});
+</script>
+</body>
+</html>

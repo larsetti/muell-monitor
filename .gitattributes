@@ -1,0 +1,2 @@
+# Shell-Skripte immer mit LF-Zeilenenden speichern (auch auf Windows)
+*.sh text eol=lf

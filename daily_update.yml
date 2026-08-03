@@ -1,0 +1,44 @@
+name: Täglicher Müll-Tracker Update
+
+on:
+  # schedule:                    # Deaktiviert — Raspberry Pi übernimmt tägliche Updates
+  #   - cron: '0 6 * * *'
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install requests
+
+      - name: Tracker ausführen (API holen + DB befüllen)
+        run: python tracker.py
+        continue-on-error: true
+
+      - name: HTML regenerieren
+        run: python export_html.py
+        continue-on-error: true
+
+      - name: index.html committen
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Actions Bot"
+          # ordnungsamt.db bewusst NICHT committen (DSGVO: PII-DB bleibt lokal,
+          # konsistent mit pi_setup.sh / run_tracker.bat / Pi-Cronjob).
+          git add index.html
+          git diff --staged --quiet || git commit -m "Auto-Update: $(date '+%Y-%m-%d')"
+          git push

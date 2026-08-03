@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Müll-Monitor · Wartung</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
+<link rel="icon" type="image/x-icon" href="assets/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
+<meta property="og:title" content="Müll-Monitor · Datenbasiertes Hotspot-Monitoring">
+<meta property="og:description" content="Die öffentliche Ansicht ist aktuell pausiert. Datenerfassung läuft im Hintergrund weiter.">
+<meta property="og:image" content="assets/og-card.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<!-- A-12 (DSFA 28.07.2026): Schrift lokal statt von fonts.googleapis.com.
+     Auch die Wartungsseite hat bis hierher die IP jedes Besuchers an Google
+     weitergegeben, obwohl sie gar keine Daten zeigt. Beschafft mit
+     vendor_assets.py, Prüfsumme mit sri.py. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="assets/vendor/fonts/montserrat.css" integrity="sha384-kFV7xmVJC1MMNBo4x272m09uJdm6iEqyQCVdmbSSlys1oxgWcYqxrM19hE2TLm+5" crossorigin="anonymous"/>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%;
+  font-family: 'Montserrat', system-ui, -apple-system, sans-serif;
+  background: linear-gradient(135deg, #2d3748 0%, #1a202c 100%);
+  color: #cbd5e0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wrap {
+  text-align: center;
+  padding: 40px 24px;
+  max-width: 600px;
+}
+.logo-plate {
+  display: inline-block;
+  background: #ffffff;
+  border-radius: 22px;
+  padding: 24px 36px 18px;
+  margin: 0 auto 32px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .35);
+}
+.logo-plate img {
+  display: block;
+  width: 300px;
+  max-width: 70vw;
+  height: auto;
+}
+.sub {
+  font-size: 14px;
+  color: #a0aec0;
+  margin-bottom: 32px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+}
+.accent-bar {
+  width: 48px;
+  height: 3px;
+  background: #d62828;
+  margin: 0 auto 36px;
+  border-radius: 2px;
+}
+h2 {
+  font-size: 22px;
+  font-weight: 600;
+  color: white;
+  margin-bottom: 16px;
+}
+p {
+  font-size: 15px;
+  line-height: 1.7;
+  margin-bottom: 18px;
+  color: #cbd5e0;
+}
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(39, 103, 73, .15);
+  border: 1px solid rgba(39, 103, 73, .3);
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  color: #81e6a8;
+  margin-top: 16px;
+}
+.status::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  background: #38a169;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .4; }
+}
+.footer {
+  margin-top: 56px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(255,255,255,.1);
+  font-size: 12px;
+  color: #718096;
+}
+.footer a {
+  color: #a0aec0;
+  text-decoration: none;
+}
+.imp-btn {
+  display: inline-block;
+  margin-top: 16px;
+  padding: 8px 18px;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.15);
+  color: #cbd5e0;
+  text-decoration: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background .15s;
+}
+.imp-btn:hover { background: rgba(255,255,255,.15); }
+#impOverlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.7);
+  z-index: 1000;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+#impOverlay.show { display: flex; }
+#impBox {
+  background: white;
+  color: #1a202c;
+  border-radius: 12px;
+  padding: 32px;
+  max-width: 520px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.6;
+}
+#impBox h3 { font-size: 16px; margin: 16px 0 8px; color: #1a202c; }
+#impBox h3:first-child { margin-top: 0; }
+#impBox p { margin-bottom: 10px; color: #4a5568; font-size: 13px; }
+#impBox a { color: #d62828; text-decoration: none; }
+.imp-close {
+  float: right;
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  color: #a0aec0;
+  line-height: 1;
+  padding: 0;
+}
+.imp-close:hover { color: #1a202c; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo-plate">
+    <img src="assets/logo_color.png" alt="Müll-Monitor">
+  </div>
+  <div class="sub">Datenbasiertes Hotspot-Monitoring</div>
+  <div class="accent-bar"></div>
+  <h2>Die öffentliche Ansicht ist derzeit nicht verfügbar.</h2>
+  <p>Die Plattform befindet sich in einer Übergangs- und Entwicklungsphase. In dieser Zeit ist die interaktive Karte und Hotspot-Analyse vorübergehend nicht öffentlich erreichbar.</p>
+  <p>Die tägliche Datenerfassung aus der OpenData-API des Berliner Ordnungsamtes läuft weiterhin im Hintergrund. Die Datenbank wird kontinuierlich aktualisiert.</p>
+  <div class="status">Datenerfassung aktiv</div>
+  <div class="footer">
+    Kontakt: <a href="mailto:info@muell-monitor.de">info@muell-monitor.de</a><br>
+    © 2026 Lars Wittkopf · muell-monitor.de
+    <div><button class="imp-btn" onclick="document.getElementById('impOverlay').classList.add('show')">Impressum</button></div>
+  </div>
+</div>
+
+<div id="impOverlay" onclick="if(event.target===this)this.classList.remove('show')">
+  <div id="impBox">
+    <button class="imp-close" onclick="document.getElementById('impOverlay').classList.remove('show')">&times;</button>
+    <h3>Impressum</h3>
+    <p><strong>Angaben gemäß § 5 DDG / § 18 Abs. 2 MStV</strong></p>
+    <p>
+      Lars Wittkopf<br>
+      c/o MDC#279<br>
+      Welserstraße 3<br>
+      87463 Dietmannsried
+    </p>
+    <p>
+      <strong>Kontakt:</strong><br>
+      E-Mail: <a href="mailto:info@muell-monitor.de">info@muell-monitor.de</a>
+    </p>
+    <p>
+      <strong>Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV:</strong><br>
+      Lars Wittkopf (Anschrift wie oben)
+    </p>
+    <h3>Haftungsausschluss</h3>
+    <p>Die dargestellten Daten basieren auf der OpenData-API des Berliner Ordnungsamtes. Trotz sorgfältiger inhaltlicher Kontrolle wird keine Gewähr für Aktualität, Richtigkeit und Vollständigkeit übernommen.</p>
+    <h3>Hinweis zum Datenschutz</h3>
+    <p>Die Webseite befindet sich derzeit in einer Datenschutz-Überarbeitung. Müll-Monitor wertet öffentlich bereitgestellte Meldungen des Ordnungsamts (Open Data) aus. Diese Meldungen enthalten Angaben mit Ortsbezug (Straße, Postleitzahl, Geo-Koordinate), die im Einzelfall einen Personenbezug aufweisen können. Hausnummern und Klarnamen werden nicht gespeichert.</p>
+    <p>Eine vollständige Datenschutzerklärung nach Art. 13 und 14 DSGVO wird mit der nächsten Veröffentlichung bereitgestellt.</p>
+    <p>Verantwortlich: [Name / Firma, Anschrift, E-Mail]</p>
+    <h3>Copyright &amp; Lizenz</h3>
+    <p>© 2026 Lars Wittkopf · Alle Rechte vorbehalten<br>
+    Code: <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank">AGPL-3.0</a> · Daten: <a href="https://www.govdata.de/dl-de/by-2-0" target="_blank">DL-DE-BY-2.0</a></p>
+  </div>
+</div>
+</body>
+</html>
