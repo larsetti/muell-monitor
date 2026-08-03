@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""
+# Roher Zeichenkettenliteral, weil unten Windows-Pfade stehen: '\d' in
+# '..\dsgvo\...' laese Python sonst als Maskierung und warnte bei jedem Lauf.
+r"""
 Betreff-Filter (Abhilfe A-14 der DSFA vom 28.07.2026, Risiko R-10)
 ==================================================================
 Bürger schreiben beim Melden einen freien Betreff. Die allermeisten nennen
