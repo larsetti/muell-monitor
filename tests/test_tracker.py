@@ -737,8 +737,11 @@ def _setup_export_env(tmpdir: Path, with_marker: bool):
     Gibt die Original-Pfade als dict zum Wiederherstellen zurück.
     """
     template_path = tmpdir / "template.html"
+    # __LAST_UPDATE__ gehört dazu: seit T-39 bricht render_live() ab, wenn der
+    # Platzhalter fehlt — sonst ginge eine Seite ohne Datenstand online (H-04).
     template_path.write_text(
-        "<html><body><div id='app'>__APP_DATA_PLACEHOLDER__</div></body></html>",
+        "<html><body><div id='app'>__APP_DATA_PLACEHOLDER__</div>"
+        "<span>__LAST_UPDATE__</span></body></html>",
         encoding="utf-8",
     )
     maintenance_path = tmpdir / "maintenance.html"

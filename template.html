@@ -9,7 +9,13 @@
 <link rel="icon" type="image/x-icon" href="assets/favicon.ico">
 <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
 <meta property="og:title" content="Müll-Hotspot Monitor · Berlin">
-<meta property="og:description" content="Tagesaktuelle Karte chronischer Müll-Hotspots in Berlin – aus offenen Ordnungsamt-Daten.">
+<!-- T-39 / Befund H-04 (29.07.2026): hier stand bis zum 13.08.2026 eine
+     Zusicherung täglicher Aktualität. Die Vorschau in sozialen Netzen und
+     Messengern ist die erste Aussage, die ein Besucher sieht, und sie stand
+     fest verdrahtet im Quelltext — unabhängig davon, ob die Quelle überhaupt
+     noch liefert. Der Stand steht jetzt sichtbar auf der Seite selbst; die
+     Vorschau verspricht nichts mehr über Aktualität. -->
+<meta property="og:description" content="Karte chronischer Müll-Hotspots in Berlin – aus offenen Ordnungsamt-Daten.">
 <meta property="og:image" content="https://muell-monitor.de/assets/og-card.png">
 <meta property="og:url" content="https://muell-monitor.de/">
 <meta property="og:type" content="website">
@@ -55,6 +61,20 @@ body{font-family:'Source Sans 3',Arial,sans-serif;background:var(--light);color:
 .hst-v{font-size:16px;font-weight:700;line-height:1}
 .hst-l{font-size:9px;opacity:.8;text-transform:uppercase;letter-spacing:.3px}
 .hst.dk{background:rgba(0,0,0,.2)}
+
+/* DATENSTAND (T-39 / Befund H-04 vom 29.07.2026)
+   Der Streifen liegt zwischen Kopfzeile und Karte, weil der Stand der Daten
+   keine Fußnote ist: die Seite zeigt Orte, an denen zuletzt Müll lag, und
+   ohne Datum lässt sich daraus nichts ablesen. Im Normalfall bleibt er
+   zurückhaltend grau; ist der Stand alt oder unbekannt, wechselt er in die
+   Warnfarbe, statt die Lücke stillschweigend zu übergehen. */
+.datenstand{flex-shrink:0;display:flex;align-items:center;gap:8px;
+  background:#ececec;border-bottom:1px solid var(--border);
+  padding:5px 16px;font-size:11.5px;line-height:1.4;color:#5a5a5a;z-index:150}
+.ds-dot{width:7px;height:7px;border-radius:50%;background:#2d7d2d;flex-shrink:0}
+.datenstand.warn{background:#fdf1de;border-bottom-color:#dda93f;
+  color:#7a4400;font-weight:600}
+.datenstand.warn .ds-dot{background:#c47f00}
 
 /* LAYOUT */
 .main{display:flex;flex:1;overflow:hidden;position:relative}
@@ -286,6 +306,9 @@ select.fs:focus{outline:2px solid var(--red)}
   .hdr-legal-btn{font-size:9px;padding:4px 6px}
   .hdr-legal-btn.lang .voll{display:none}
   .hdr-legal-btn.lang .kurz{display:inline}
+  /* Der Datenstand bleibt auch auf 360 px stehen. Er wird enger gesetzt,
+     aber nicht ausgeblendet — er ist der Grund, aus dem T-39 existiert. */
+  .datenstand{padding:4px 8px;font-size:10.5px;gap:6px}
 }
 
 /* ── Pflichtangaben: Impressum, Datenschutz, Widerspruch (T-25 / T-40) ────── */
@@ -382,6 +405,17 @@ select.fs:focus{outline:2px solid var(--red)}
   </div>
 </div>
 
+<!-- T-39 / Befund H-04 der Gegenprüfung vom 29.07.2026: Die Seite sicherte an
+     zwei fest verdrahteten Stellen tägliche Aktualität zu und zeigte den in
+     export_html.load_data() längst berechneten Stand nirgends an. Der
+     Platzhalter __LAST_UPDATE__ war beim Design-Umbau aus der Vorlage gefallen,
+     die Ersetzung in export_html lief seither ins Leere.
+     Der Text hier wird beim Rendern eingesetzt und steht deshalb auch ohne
+     JavaScript da; renderDatenstand() rechnet zusätzlich das Alter aus. -->
+<div class="datenstand" id="datenstand">
+  <span class="ds-dot"></span><span id="dsText">Stand der Daten: __LAST_UPDATE__</span>
+</div>
+
 <div class="main">
   <div id="map"></div>
   <div class="sidebar" id="sheet">
@@ -476,7 +510,11 @@ select.fs:focus{outline:2px solid var(--red)}
         <div class="li"><span class="ln">×</span>Zeitfaktor: aktuellere Standorte höher gewichtet</div>
       </div>
       <div class="isec"><h3>Datengrundlage</h3>
-        <p style="font-size:12px;color:#666;line-height:1.6">Ordnungsamt Online API · Berlin Open Data<br>Datenlizenz Deutschland – Namensnennung 2.0<br>Tagesaktuelle Aktualisierung</p>
+        <!-- T-39: hier stand die zweite Zusicherung täglicher Aktualität. Der
+             Abruf ist täglich getaktet, das ist richtig; ob er etwas bringt,
+             hängt an der Schnittstelle der Behörde. Genannt wird deshalb der
+             Stand, nicht der Takt. -->
+        <p style="font-size:12px;color:#666;line-height:1.6">Ordnungsamt Online API · Berlin Open Data<br>Datenlizenz Deutschland – Namensnennung 2.0<br>Stand der Daten: __LAST_UPDATE__<br>Der Abruf läuft einmal täglich. Angezeigt wird der letzte Abruf, der Daten geliefert hat.</p>
       </div>
     </div>
 
@@ -745,6 +783,41 @@ function renderStats(){
      <div class="hst"><div class="hst-v">${total}</div><div class="hst-l">Meldungen</div></div>`;
 }
 
+// ── Datenstand (T-39 / Befund H-04) ────────────────────────────────────
+// D.last_update kommt aus dem letzten ERFOLGREICHEN Abruf (H-02b), nicht aus
+// dem Render-Datum. Das ist der Kern der Sache: die Pipeline läuft täglich
+// weiter, auch wenn die Schnittstelle der Behörde seit Monaten nichts liefert.
+// Ein Render-Datum würde jeden Tag Frische vortäuschen, die es nicht gibt.
+const DATENSTAND_WARNUNG_TAGE = 7;
+
+function renderDatenstand(){
+  const box = document.getElementById('datenstand');
+  const txt = document.getElementById('dsText');
+  if(!box || !txt) return;
+
+  const iso = D.last_update;
+  const datum = iso ? new Date(iso + 'T00:00:00') : null;
+  if(!datum || isNaN(datum.getTime())){
+    box.classList.add('warn');
+    txt.textContent = 'Stand der Daten unbekannt — es liegt kein Abruf vor, '
+      + 'der Daten geliefert hat. Die Karte zeigt einen Altbestand.';
+    return;
+  }
+
+  const deutsch = String(datum.getDate()).padStart(2,'0') + '.'
+    + String(datum.getMonth()+1).padStart(2,'0') + '.' + datum.getFullYear();
+  const tage = Math.floor((Date.now() - datum.getTime()) / 86400000);
+
+  if(tage > DATENSTAND_WARNUNG_TAGE){
+    box.classList.add('warn');
+    txt.textContent = `Stand der Daten: ${deutsch} — seit ${tage} Tagen sind `
+      + 'keine neuen Meldungen aus der Quelle eingegangen.';
+  } else {
+    box.classList.remove('warn');
+    txt.textContent = `Stand der Daten: ${deutsch}`;
+  }
+}
+
 // ── Render Abfallart Chips ─────────────────────────────────────────────
 function renderKatChips(){
   const kk = D.kategorie_gruppen||{};
@@ -978,6 +1051,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   });
 
   renderKatChips();
+  renderDatenstand();
   initMap();
   renderStats();
   renderHList();

@@ -7,6 +7,8 @@ Deckt ab:
 - A-2: Ortszellen mit nur einer Meldung werden nicht persistiert
 - A-7: Sperrliste nimmt einzelne Cluster dauerhaft vom Export aus (Art. 21)
 - A-12: keine Fremdhosts mehr im ausgelieferten HTML, CSP und SRI gesetzt
+- H-04 / T-39: die Seite nennt ihren Datenstand und behauptet keine
+  Tagesaktualitaet mehr (Art. 5 Abs. 1 lit. d)
 
 Grundlage: audits\\dsgvo\\2026-07-28-dsfa-art35.md
 """
@@ -713,3 +715,108 @@ def test_m02_first_seen_ueberlebt_die_loeschung_der_aeltesten_meldung_nicht(tmp_
     assert nachher == "2026-06-01", (
         f"first_seen steht noch auf {nachher!r}. Das Meldedatum der geloeschten "
         f"Meldung ueberlebt in der veroeffentlichten Zelle (M-02).")
+
+
+# ── H-04 / T-39: Datenstand statt behaupteter Tagesaktualitaet ───────────────
+#
+# Befund H-04 der Gegenpruefung vom 29.07.2026: die Seite behauptete an zwei
+# fest verdrahteten Stellen, sie sei tagesaktuell, waehrend die Quelle seit dem
+# 22.04.2026 nichts mehr lieferte. Der berechnete Stand wurde nirgends
+# angezeigt, weil der Platzhalter beim Design-Umbau aus der Vorlage gefallen
+# war. Gegenueber einer Kommune als zahlendem Kunden ist das eine falsche
+# Leistungsangabe, gegenueber Betroffenen beruehrt es Art. 5 Abs. 1 lit. d.
+
+def _fetch_log(db_path: Path, eintraege: list[tuple]):
+    """Schreibt (fetched_at, count_total)-Tupel in fetch_log."""
+    conn = sqlite3.connect(db_path)
+    for fetched_at, count_total in eintraege:
+        conn.execute(
+            "INSERT INTO fetch_log (fetched_at, count_total, count_new, count_muell) "
+            "VALUES (?,?,0,0)", (fetched_at, count_total))
+    conn.commit()
+    conn.close()
+
+
+def test_t39_vorlage_behauptet_keine_tagesaktualitaet_mehr():
+    """Keine fest verdrahtete Aussage ueber Aktualitaet in der Vorlage.
+
+    Sie war doppelt vorhanden: in der og:description (Zeile 12) und im
+    Abschnitt Datengrundlage. Beide standen im Quelltext und waren damit
+    unabhaengig davon wahr oder falsch, ob die Schnittstelle liefert.
+    """
+    treffer = [zeile.strip() for zeile in TEMPLATE_HTML.splitlines()
+               if "tagesaktuell" in zeile.lower()]
+    assert not treffer, (
+        f"Die Vorlage behauptet weiterhin Tagesaktualitaet: {treffer}")
+
+
+def test_t39_vorlage_traegt_den_platzhalter_wieder():
+    """Ohne __LAST_UPDATE__ laeuft die Ersetzung in export_html ins Leere —
+    still, weil eine Nicht-Ersetzung genau aussieht wie ein geglueckter Lauf."""
+    assert "__LAST_UPDATE__" in TEMPLATE_HTML, (
+        "Der Platzhalter fehlt in template.html. Genau so ist H-04 entstanden.")
+
+
+def test_t39_gerenderte_seite_traegt_den_stand_aus_dem_fetch_log(tmp_path):
+    """Der Stand aus dem letzten ERFOLGREICHEN Abruf muss im HTML stehen.
+
+    Ausdruecklich nicht das Render-Datum: die Pipeline laeuft taeglich weiter,
+    auch waehrend die Behoerde nichts liefert.
+    """
+    db = _db_mit_hotspots(tmp_path, [_hotspot("52.50000_13.40000", 52.5, 13.4)])
+    _fetch_log(db, [("2026-04-14T06:00:00", 105456),
+                    ("2026-04-22T06:00:00", 105100),
+                    ("2026-08-13T06:00:00", -1)])   # Fehllauf, zaehlt nicht
+    orig, out = _setup_export_env(tmp_path, with_marker=True, db_path=db)
+    try:
+        assert export_html.main() == 0
+        html = out.read_text(encoding="utf-8")
+        # An der Stelle des Platzhalters, nicht irgendwo: das Render-Datum
+        # steckt ohnehin im eingebetteten Prognose-Block.
+        assert "<span>22.04.2026</span>" in html, (
+            "Der Datenstand aus dem fetch_log steht nicht an der Stelle des "
+            "Platzhalters im gerenderten HTML")
+        assert "__LAST_UPDATE__" not in html, "Platzhalter nicht ersetzt"
+        assert "<span>14.04.2026</span>" not in html, (
+            "Es wird nicht der juengste erfolgreiche Abruf angezeigt")
+    finally:
+        _restore(orig)
+
+
+def test_t39_ohne_erfolgreichen_abruf_steht_unbekannt(tmp_path):
+    """Frische Datenbank ohne einen einzigen erfolgreichen Abruf: die Seite
+    sagt 'unbekannt' und nicht etwa das heutige Datum."""
+    db = _db_mit_hotspots(tmp_path, [_hotspot("52.50000_13.40000", 52.5, 13.4)])
+    orig, out = _setup_export_env(tmp_path, with_marker=True, db_path=db)
+    try:
+        assert export_html.main() == 0
+        html = out.read_text(encoding="utf-8")
+        assert "unbekannt" in html, "Fehlender Datenstand wird nicht benannt"
+    finally:
+        _restore(orig)
+
+
+def test_t39_render_bricht_ab_wenn_der_platzhalter_fehlt(tmp_path, monkeypatch):
+    """Faellt der Platzhalter wieder aus der Vorlage, darf der Render nicht
+    stillschweigend eine Seite ohne Datenstand schreiben."""
+    db = _db_mit_hotspots(tmp_path, [_hotspot("52.50000_13.40000", 52.5, 13.4)])
+    vorlage = tmp_path / "ohne_platzhalter.html"
+    vorlage.write_text("<html>__APP_DATA_PLACEHOLDER__</html>", encoding="utf-8")
+    ausgabe = tmp_path / "index_ohne.html"
+    monkeypatch.setattr(export_html, "DB_PATH", db)
+    monkeypatch.setattr(export_html, "TEMPLATE", vorlage)
+    monkeypatch.setattr(export_html, "OUT_PATH", ausgabe)
+
+    import pytest
+    with pytest.raises(RuntimeError, match="__LAST_UPDATE__"):
+        export_html.render_live()
+    assert not ausgabe.exists(), "Es wurde trotzdem eine Seite geschrieben"
+
+
+def test_t39_deutsches_datum_und_rueckfall():
+    assert export_html.stand_fuer_anzeige("2026-04-22") == "22.04.2026"
+    assert export_html.stand_fuer_anzeige("2026-04-22T06:00:00") == "22.04.2026"
+    assert export_html.stand_fuer_anzeige(None) == "unbekannt"
+    assert export_html.stand_fuer_anzeige("") == "unbekannt"
+    # Unerwartetes Format wird durchgereicht, nicht verschluckt.
+    assert export_html.stand_fuer_anzeige("kaputt") == "kaputt"

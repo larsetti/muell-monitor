@@ -365,6 +365,24 @@ def pruefe_sri():
     if ohne:
         print(f"  Hinweis: {len(ohne)} Einbindung(en) ohne Pruefsumme: {ohne}")
 
+def stand_fuer_anzeige(iso: str | None) -> str:
+    """T-39 / H-04: Das ISO-Datum aus dem fetch_log als deutsches Datum.
+
+    Der Rückgabewert ersetzt __LAST_UPDATE__ in der Vorlage und steht damit
+    im ausgelieferten HTML — auch ohne JavaScript. Das Frontend rechnet
+    zusätzlich aus D.last_update das Alter aus und warnt ab sieben Tagen.
+    Ohne erfolgreichen Abruf steht dort 'unbekannt' und nicht etwa das
+    Render-Datum: eine Seite, die täglich neu gebaut wird, während die
+    Quelle nichts liefert, darf sich nicht selbst als frisch ausweisen.
+    """
+    if not iso:
+        return "unbekannt"
+    try:
+        return datetime.strptime(iso[:10], "%Y-%m-%d").strftime("%d.%m.%Y")
+    except ValueError:
+        return iso
+
+
 def render_live():
     """Rendert die Live-Karte aus der DB nach OUT_PATH (index.html)."""
     pruefe_sri()
@@ -375,10 +393,21 @@ def render_live():
     # HTML-Sonderzeichen im JSON escapen, damit </script>-Tags den Block nicht brechen (C-04)
     compact = compact.replace('</', r'<\/')
     tmpl = TEMPLATE.read_text(encoding='utf-8')
-    last_update_str = data['last_update'] or 'unbekannt'
+    # T-39: Die Ersetzung lief zwischen dem Design-Umbau und dem 13.08.2026
+    # ins Leere, weil der Platzhalter aus der Vorlage gefallen war. Gemerkt
+    # hat das niemand, weil eine stille Nicht-Ersetzung genau aussieht wie ein
+    # geglückter Lauf. Jetzt bricht der Render ab, statt eine Seite ohne
+    # Datenstand zu veröffentlichen.
+    if '__LAST_UPDATE__' not in tmpl:
+        raise RuntimeError(
+            f"{TEMPLATE.name} enthält keinen Platzhalter __LAST_UPDATE__. "
+            f"Ohne ihn ginge eine Seite online, die keinen Datenstand nennt "
+            f"(Befund H-04 vom 29.07.2026, T-39)."
+        )
+    last_update_str = stand_fuer_anzeige(data['last_update'])
     html = tmpl.replace('__APP_DATA_PLACEHOLDER__', compact).replace('__LAST_UPDATE__', last_update_str)
     OUT_PATH.write_text(html, encoding='utf-8')
-    print(f"  Gespeichert: {OUT_PATH}")
+    print(f"  Gespeichert: {OUT_PATH} (Stand der Daten: {last_update_str})")
 
 def _schreibe_wenn_abweichend(inhalt: str) -> bool:
     """Schreibt inhalt nach OUT_PATH, wenn dort etwas anderes steht. True = geschrieben."""
