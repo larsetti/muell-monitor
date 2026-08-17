@@ -3,22 +3,27 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Müll-Monitor · Städte</title>
-<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
-<link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
-<link rel="icon" type="image/x-icon" href="assets/favicon.ico">
-<link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
+<title>Müll-Monitor Köln · Wartung</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../assets/favicon-16.png">
+<link rel="icon" type="image/x-icon" href="../assets/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/apple-touch-icon.png">
 <meta property="og:title" content="Müll-Monitor · Datenbasiertes Hotspot-Monitoring">
-<meta property="og:description" content="Auswertung öffentlich gemeldeter Müllablagerungen. Auswahl nach Stadt.">
-<meta property="og:image" content="assets/og-card.png">
+<!-- T-67 (15.08.2026): Der Vorschautext sagte bis heute, die Erfassung laufe
+     im Hintergrund weiter. Seit dem 22.04.2026 traf das nicht mehr zu, und er
+     ging in jede Verlinkung in Messengern und sozialen Netzen mit. Der alte
+     Wortlaut steht bewusst nicht hier, sondern nur im Bericht S-06 vom
+     15.08.2026: er wandert sonst als Zitat in jede gebaute Stadtseite. -->
+<meta property="og:description" content="Die öffentliche Ansicht ist derzeit nicht verfügbar. Die Berliner Quelle liefert seit dem 22.04.2026 keine neuen Meldungen.">
+<meta property="og:image" content="../assets/og-card.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
+<!-- A-12 (DSFA 28.07.2026): Schrift lokal statt von fonts.googleapis.com.
+     Auch die Wartungsseite hat bis hierher die IP jedes Besuchers an Google
+     weitergegeben, obwohl sie gar keine Daten zeigt. Beschafft mit
+     vendor_assets.py, Prüfsumme mit sri.py. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self'; base-uri 'none'; form-action 'none'">
-<link rel="stylesheet" href="assets/vendor/fonts/montserrat.css" integrity="sha384-kFV7xmVJC1MMNBo4x272m09uJdm6iEqyQCVdmbSSlys1oxgWcYqxrM19hE2TLm+5" crossorigin="anonymous"/>
-<!-- Stil und Rechtstexte stammen aus maintenance.html und werden beim Bauen
-     eingesetzt. Sie stehen bewusst NICHT ein zweites Mal in dieser Datei: zwei
-     Fassungen derselben Pflichtangaben laufen sonst irgendwann auseinander,
-     und gemerkt wird das erst, wenn jemand die falsche liest. -->
+<link rel="stylesheet" href="../assets/vendor/fonts/montserrat.css" integrity="sha384-kFV7xmVJC1MMNBo4x272m09uJdm6iEqyQCVdmbSSlys1oxgWcYqxrM19hE2TLm+5" crossorigin="anonymous"/>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
@@ -171,73 +176,34 @@ p {
 .imp-close:hover { color: #1a202c; }
 </style>
 <style>
-/* Nur die Ergaenzungen fuer die Staedte-Auswahl. Alles Uebrige kommt aus dem
-   eingesetzten Stilblock der Wartungsseite. Die Namen der Platzhalter duerfen
-   hier NICHT auftauchen: sie wuerden beim Bauen mitersetzt und dieses
-   Stil-Element von innen heraus schliessen. Genau das ist am 14.08.2026
-   passiert und erst im Browser aufgefallen. */
-body { align-items: flex-start; }
-.wrap { padding-top: 64px; padding-bottom: 64px; max-width: 720px; }
-.staedte {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 16px;
-  margin: 8px 0 8px;
-  text-align: left;
+.status {
+  background: rgba(255,255,255,.08);
+  border-color: rgba(255,255,255,.18);
+  color: #cbd5e0;
 }
-.stadt {
-  display: block;
-  background: rgba(255,255,255,.06);
-  border: 1px solid rgba(255,255,255,.12);
-  border-radius: 12px;
-  padding: 20px 22px;
-  text-decoration: none;
-  color: inherit;
-  transition: background .15s, border-color .15s;
-}
-a.stadt:hover { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.24); }
-.stadt-name {
-  font-size: 19px;
-  font-weight: 600;
-  color: #fff;
-  margin-bottom: 6px;
-}
-.stadt-status { font-size: 13px; color: #a0aec0; line-height: 1.5; }
-.stadt-marke {
-  display: inline-block;
-  margin-top: 12px;
-  padding: 3px 10px;
-  border-radius: 12px;
-  font-size: 11px;
-  letter-spacing: .4px;
-  text-transform: uppercase;
-}
-.marke-archiv { background: rgba(214,40,40,.15); border: 1px solid rgba(214,40,40,.35); color: #f8b4b4; }
-.marke-vorbereitung { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18); color: #cbd5e0; }
-.marke-live { background: rgba(39,103,73,.15); border: 1px solid rgba(39,103,73,.3); color: #81e6a8; }
+.status::before { background: #a0aec0; animation: none; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="logo-plate">
-    <img src="assets/logo_color.png" alt="Müll-Monitor">
+    <img src="../assets/logo_color.png" alt="Müll-Monitor">
   </div>
   <div class="sub">Datenbasiertes Hotspot-Monitoring</div>
   <div class="accent-bar"></div>
-  <h2>Städte</h2>
-  <p>Der Müll-Monitor wertet öffentlich gemeldete Müllablagerungen je Stadt aus. Bitte eine Stadt auswählen.</p>
-  <div class="staedte">
-    <a class="stadt" href="berlin/">
-      <div class="stadt-name">Berlin</div>
-      <div class="stadt-status">Erfasster Bestand bis zum 22.04.2026. Die Quelle liefert seit dem 22.04.2026 keine neuen Meldungen.</div>
-      <span class="stadt-marke marke-archiv">Archiv</span>
-    </a>
-    <a class="stadt" href="koeln/">
-      <div class="stadt-name">Köln</div>
-      <div class="stadt-status">Die Übernahme der Kölner Meldungen wird vorbereitet.</div>
-      <span class="stadt-marke marke-vorbereitung">In Vorbereitung</span>
-    </a>
-  </div>
+  <h2>Die öffentliche Ansicht ist derzeit nicht verfügbar.</h2>
+  <p>Die Plattform befindet sich in einer Übergangs- und Entwicklungsphase. In dieser Zeit ist die interaktive Karte und Hotspot-Analyse vorübergehend nicht öffentlich erreichbar.</p>
+  <!-- T-67 (15.08.2026): Bis heute versprachen diese beiden Zeilen eine
+       tägliche Erfassung und einen laufend aktualisierten Bestand, dazu ein
+       grünes Abzeichen. Seit dem 22.04.2026 war das falsch, und es stand
+       öffentlich im Netz, weil index.html eine Kopie dieser Datei ist. Der alte
+       Wortlaut steht im Bericht S-06 vom 15.08.2026 und absichtlich nicht hier,
+       sonst zöge das Zitat in jede gebaute Stadtseite mit.
+       Diese beiden Zeilen sind zugleich ANKER_QUELLE und ANKER_STATUS in
+       export_html.py. Wer sie umformuliert, zieht die Anker dort mit, sonst
+       bricht der Bau der Stadtseiten ab. Das ist Absicht. -->
+  <p>Die Kölner Ansicht wird gerade vorbereitet. Grundlage sind die offen bereitgestellten Anliegen-Meldungen der Stadt Köln.</p>
+  <div class="status">In Vorbereitung</div>
   <div class="footer">
     Kontakt: <a href="mailto:info@muell-monitor.de">info@muell-monitor.de</a><br>
     © 2026 Lars Wittkopf · muell-monitor.de
@@ -265,7 +231,7 @@ a.stadt:hover { background: rgba(255,255,255,.12); border-color: rgba(255,255,25
       Lars Wittkopf (Anschrift wie oben)
     </p>
     <h3>Haftungsausschluss</h3>
-    <p>Die dargestellten Daten basieren auf der OpenData-API des Berliner Ordnungsamtes. Trotz sorgfältiger inhaltlicher Kontrolle wird keine Gewähr für Aktualität, Richtigkeit und Vollständigkeit übernommen.</p>
+    <p>Die dargestellten Daten basieren auf den offen bereitgestellten Anliegen-Meldungen der Stadt Köln. Trotz sorgfältiger inhaltlicher Kontrolle wird keine Gewähr für Aktualität, Richtigkeit und Vollständigkeit übernommen.</p>
     <h3>Hinweis zum Datenschutz</h3>
     <p>Die Webseite befindet sich derzeit in einer Datenschutz-Überarbeitung. Müll-Monitor wertet öffentlich bereitgestellte Meldungen des Ordnungsamts (Open Data) aus. Diese Meldungen enthalten Angaben mit Ortsbezug (Straße, Postleitzahl, Geo-Koordinate), die im Einzelfall einen Personenbezug aufweisen können. Hausnummern und Klarnamen werden nicht gespeichert.</p>
     <p>Eine vollständige Datenschutzerklärung nach Art. 13 und 14 DSGVO wird mit der nächsten Veröffentlichung bereitgestellt.</p>
@@ -288,7 +254,7 @@ a.stadt:hover { background: rgba(255,255,255,.12); border-color: rgba(255,255,25
     </p>
     <h3>Copyright &amp; Lizenz</h3>
     <p>© 2026 Lars Wittkopf · Alle Rechte vorbehalten<br>
-    Code: <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank">AGPL-3.0</a> · Daten: <a href="https://www.govdata.de/dl-de/by-2-0" target="_blank">DL-DE-BY-2.0</a></p>
+    Code: <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank">AGPL-3.0</a> · Daten: <a href="https://www.govdata.de/dl-de/zero-2-0" target="_blank">DL-DE-ZERO-2.0</a></p>
   </div>
 </div>
 </body>

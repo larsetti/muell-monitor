@@ -20,6 +20,26 @@ Muell_Monitor_Broschuere_final.docx
 # = Datei bewusst auf dem Publish-Host anlegen; sperren = Datei dort loeschen.
 LIVE_FREIGEGEBEN
 
+# Vorschau der Städte-Struktur (T-49, 14.08.2026). Hierhin baut
+# "python export_html.py --staedte" per Default. Der Ordner ist bewusst
+# gitignored: er dient dem Ansehen im Browser, nicht der Veröffentlichung.
+# Die ausgelieferte Struktur wird erst umgestellt, wenn Lars es sagt — dann
+# mit --ziel . --jetzt-umstellen. Enthält eine Verzeichnisverknüpfung auf
+# assets/, damit die Vorschau mit Logo und Schrift lädt.
+_vorschau/
+
+# Freigabe-Schalter je Stadt (T-49). Gleiche Begründung wie LIVE_FREIGEGEBEN
+# oben: niemals committen, damit jeder frische Klon auf Wartung bleibt.
+LIVE_FREIGEGEBEN_*
+
+# Die Umlaut-Weiterleitung /köln/ baut export_html.baue_umlaut_weiterleitung()
+# bei jedem Lauf neu. Sie ist eine Bequemlichkeit für getippte Adressen und
+# gehört nicht ins Repository: ein Umlaut im Pfad wird je nach Encoding
+# unterschiedlich abgelegt, und was auf einem Windows-Rechner noch stimmt,
+# kann auf dem Deploy-Ziel schon ein anderer Name sein. Am 17.08.2026 stand
+# der Ordner bereits zum Commit vorgemerkt und wurde wieder herausgenommen.
+köln/
+
 # Sperrliste nach Art. 21 DSGVO (A-7): Zweitschrift der gesperrten Ortszellen.
 # Gehoert NICHT ins oeffentliche Repository — eine Liste der ausgenommenen Zellen
 # liesse sich gegen die Karte halten und wuerde offenlegen, wo jemand

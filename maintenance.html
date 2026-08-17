@@ -9,7 +9,12 @@
 <link rel="icon" type="image/x-icon" href="assets/favicon.ico">
 <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
 <meta property="og:title" content="Müll-Monitor · Datenbasiertes Hotspot-Monitoring">
-<meta property="og:description" content="Die öffentliche Ansicht ist aktuell pausiert. Datenerfassung läuft im Hintergrund weiter.">
+<!-- T-67 (15.08.2026): Der Vorschautext sagte bis heute, die Erfassung laufe
+     im Hintergrund weiter. Seit dem 22.04.2026 traf das nicht mehr zu, und er
+     ging in jede Verlinkung in Messengern und sozialen Netzen mit. Der alte
+     Wortlaut steht bewusst nicht hier, sondern nur im Bericht S-06 vom
+     15.08.2026: er wandert sonst als Zitat in jede gebaute Stadtseite. -->
+<meta property="og:description" content="Die öffentliche Ansicht ist derzeit nicht verfügbar. Die Berliner Quelle liefert seit dem 22.04.2026 keine neuen Meldungen.">
 <meta property="og:image" content="assets/og-card.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -75,29 +80,33 @@ p {
   margin-bottom: 18px;
   color: #cbd5e0;
 }
+/* T-67 (15.08.2026): Das Abzeichen war grün und der Punkt pulsierte, fest
+   verdrahtet und unabhängig davon, ob überhaupt etwas erfasst wird. Ein
+   Abzeichen, das immer grün ist, zeigt keinen Zustand an, es dekoriert. Seit
+   dem 22.04.2026 sagte es zudem das Gegenteil der Lage. Farbe und Punkt stehen
+   jetzt auf "ruht" und sind dieselben Werte wie STATUS_STIL["ruht"] in
+   export_html.py, damit die Berliner Stadtseite nicht anders aussieht als die
+   Wurzelseite. Wer hier wieder auf Grün geht, muss zeigen, woher der Zustand
+   kommt. */
 .status {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: rgba(39, 103, 73, .15);
-  border: 1px solid rgba(39, 103, 73, .3);
+  background: rgba(214, 40, 40, .15);
+  border: 1px solid rgba(214, 40, 40, .35);
   padding: 8px 16px;
   border-radius: 20px;
   font-size: 13px;
-  color: #81e6a8;
+  color: #f8b4b4;
   margin-top: 16px;
 }
 .status::before {
   content: '';
   width: 8px;
   height: 8px;
-  background: #38a169;
+  background: #d62828;
   border-radius: 50%;
-  animation: pulse 2s infinite;
-}
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: .4; }
+  animation: none;
 }
 .footer {
   margin-top: 56px;
@@ -176,8 +185,17 @@ p {
   <div class="accent-bar"></div>
   <h2>Die öffentliche Ansicht ist derzeit nicht verfügbar.</h2>
   <p>Die Plattform befindet sich in einer Übergangs- und Entwicklungsphase. In dieser Zeit ist die interaktive Karte und Hotspot-Analyse vorübergehend nicht öffentlich erreichbar.</p>
-  <p>Die tägliche Datenerfassung aus der OpenData-API des Berliner Ordnungsamtes läuft weiterhin im Hintergrund. Die Datenbank wird kontinuierlich aktualisiert.</p>
-  <div class="status">Datenerfassung aktiv</div>
+  <!-- T-67 (15.08.2026): Bis heute versprachen diese beiden Zeilen eine
+       tägliche Erfassung und einen laufend aktualisierten Bestand, dazu ein
+       grünes Abzeichen. Seit dem 22.04.2026 war das falsch, und es stand
+       öffentlich im Netz, weil index.html eine Kopie dieser Datei ist. Der alte
+       Wortlaut steht im Bericht S-06 vom 15.08.2026 und absichtlich nicht hier,
+       sonst zöge das Zitat in jede gebaute Stadtseite mit.
+       Diese beiden Zeilen sind zugleich ANKER_QUELLE und ANKER_STATUS in
+       export_html.py. Wer sie umformuliert, zieht die Anker dort mit, sonst
+       bricht der Bau der Stadtseiten ab. Das ist Absicht. -->
+  <p>Die Berliner Quelle liefert seit dem 22.04.2026 keine neuen Meldungen. Der bis dahin erfasste Bestand bleibt erhalten, er wächst bis auf Weiteres nicht weiter. An der Anbindung weiterer Städte wird gearbeitet.</p>
+  <div class="status">Erfassung ruht seit dem 22.04.2026</div>
   <div class="footer">
     Kontakt: <a href="mailto:info@muell-monitor.de">info@muell-monitor.de</a><br>
     © 2026 Lars Wittkopf · muell-monitor.de

@@ -18,6 +18,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 TECHNIK = Path(__file__).parent.parent
 sys.path.insert(0, str(TECHNIK))
 
@@ -620,6 +622,59 @@ def test_t25_keine_eckigen_platzhalter_in_den_ausgelieferten_seiten():
 def test_t25_maintenance_nennt_verantwortlichen_und_widerspruchsweg():
     for teil in ("Lars Wittkopf", "info@muell-monitor.de", "Art. 21"):
         assert teil in MAINTENANCE_HTML, f"maintenance.html unvollstaendig: {teil!r}"
+
+
+# ── T-67: keine unzutreffende Aussage ueber die eigene Verarbeitung ─────────
+# Bis zum 15.08.2026 stand auf muell-monitor.de, HTTP 200 und 8.266 Byte, der
+# Satz "Die taegliche Datenerfassung aus der OpenData-API des Berliner
+# Ordnungsamtes laeuft weiterhin im Hintergrund. Die Datenbank wird
+# kontinuierlich aktualisiert." samt gruenem Abzeichen "Datenerfassung aktiv".
+# Beides war seit dem 22.04.2026 falsch. Es flossen dabei keine Ortsdaten ab,
+# es stand dort eine unzutreffende Aussage ueber die eigene Verarbeitung
+# (Befund S-06 der Abnahme vom 15.08.2026).
+
+AKTUALITAETS_BEHAUPTUNGEN = (
+    "Datenerfassung aktiv",
+    "laeuft weiterhin im Hintergrund",
+    "läuft weiterhin im Hintergrund",
+    "kontinuierlich aktualisiert",
+    "Datenerfassung laeuft im Hintergrund weiter",
+    "Datenerfassung läuft im Hintergrund weiter",
+)
+
+
+@pytest.mark.parametrize("name", AUSGELIEFERTE_SEITEN)
+def test_t67_keine_seite_behauptet_laufende_erfassung(name):
+    """Die Berliner Quelle liefert seit dem 22.04.2026 nichts. Keine
+    ausgelieferte Seite darf das Gegenteil sagen."""
+    html = (TECHNIK / name).read_text(encoding="utf-8")
+    treffer = [b for b in AKTUALITAETS_BEHAUPTUNGEN if b in html]
+    assert not treffer, (
+        f"{name} behauptet weiterhin laufende Erfassung: {treffer}. "
+        f"Seit dem 22.04.2026 stimmt das nicht.")
+
+
+def test_t67_das_abzeichen_pulsiert_nicht_mehr_gruen():
+    """Ein Abzeichen, das immer gruen ist und pulsiert, zeigt keinen Zustand
+    an, es dekoriert. Der Punkt in maintenance.html haengt an keiner Messung,
+    deshalb darf er nicht aussehen wie eine Betriebsanzeige."""
+    stil = MAINTENANCE_HTML[MAINTENANCE_HTML.index("<style>"):
+                            MAINTENANCE_HTML.index("</style>")]
+    block = stil[stil.index(".status::before"):]
+    block = block[:block.index("}")]
+    assert "animation: none" in block, (
+        "Der Statuspunkt der Wartungsseite animiert wieder. Das liest sich als "
+        "'laeuft gerade'.")
+    assert "#38a169" not in block, (
+        "Der Statuspunkt der Wartungsseite ist wieder gruen.")
+
+
+def test_t67_wartungsseite_nennt_den_stillstand_mit_datum():
+    """Nicht nur die falsche Aussage entfernen, sondern die richtige hinsetzen.
+    Ohne Datum bliebe offen, seit wann nichts mehr kommt."""
+    for teil in ("22.04.2026", "keine neuen"):
+        assert teil in MAINTENANCE_HTML, (
+            f"maintenance.html sagt nicht, seit wann die Quelle ruht: {teil!r}")
 
 
 def test_t25_live_render_bleibt_ohne_freigabe_der_rechtstexte_gesperrt(tmp_path,
