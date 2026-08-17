@@ -314,3 +314,181 @@ def test_altes_verhalten_ist_unveraendert(tmp_path, monkeypatch):
     inhalt = ausgabe.read_text(encoding="utf-8")
     assert "Die öffentliche Ansicht ist derzeit nicht verfügbar." in inhalt
     assert '="assets/' in inhalt, "Die Wurzelseite braucht keinen Präfix"
+
+
+# ── K-11: der Rueckgabewert nennt den schwersten Grund ───────────────────────
+#
+# Befund K-11 der Abnahme vom 15.08.2026, geschlossen unter T-68 am 17.08.2026.
+# baue_staedte gab max(codes) zurueck und nannte das im Docstring "der
+# schwerste". Die Exit-Codes sind aber nach Erscheinen vergeben, nicht nach
+# Gewicht: 4 (keine Daten) ist groesser als 3 (Rechtstexte nicht freigegeben)
+# und damit gewann der harmlosere Grund. Auf die ausgelieferten Seiten wirkt
+# sich das nicht aus, beide Zustaende schreiben ohnehin die Wartungsseite. Es
+# geht um das Protokoll.
+
+def test_schwererer_grund_gewinnt_gegen_groesseren_code(ziel, ohne_marker):
+    """Der Kern von K-11. Beide Schalter gesetzt, Koeln ohne Daten: Berlin
+    liefert 3, Koeln 4 — zurueckkommen muss die 3."""
+    (ohne_marker / "LIVE_FREIGEGEBEN_BERLIN").write_text("")
+    (ohne_marker / "LIVE_FREIGEGEBEN_KOELN").write_text("")
+
+    codes = {}
+    echte_funktion = export_html.baue_stadt
+
+    def mitschreiben(s, z):
+        codes[s.slug] = echte_funktion(s, z)
+        return codes[s.slug]
+
+    import unittest.mock
+    with unittest.mock.patch.object(export_html, "baue_stadt", mitschreiben):
+        with unittest.mock.patch.object(export_html, "rechtstexte_freigegeben",
+                                        lambda: False):
+            gesamt = export_html.baue_staedte(ziel)
+
+    # Ausgangslage: die beiden Gruende treten wirklich beide auf. Ohne diese
+    # Pruefung koennte der Test gruen sein, weil es gar keine 4 gab.
+    assert 3 in codes.values(), (
+        f"Ausgangslage nicht hergestellt, keine Stadt meldet 3: {codes}")
+    assert 4 in codes.values(), (
+        f"Ausgangslage nicht hergestellt, keine Stadt meldet 4: {codes}")
+    assert gesamt == 3, (
+        f"baue_staedte gibt {gesamt} zurueck, die Staedte meldeten {codes}. "
+        f"Erwartet war 3 — 'Rechtstexte nicht freigegeben' ist der schwerere "
+        f"Grund als 'keine Daten', auch wenn 4 die groessere Zahl ist "
+        f"(Befund K-11). Es wird nach EXIT_RANG sortiert, nicht nach max()."
+    )
+
+
+def test_unbekannter_exit_code_verschwindet_nicht_still(ziel, ohne_marker):
+    """Wer spaeter einen fuenften Grund einfuehrt und EXIT_RANG nicht
+    nachzieht, soll ihn zu sehen bekommen statt ihn zu verlieren."""
+    import unittest.mock
+    with unittest.mock.patch.object(export_html, "baue_stadt",
+                                    lambda s, z: 7 if s.slug == "koeln" else 3):
+        gesamt = export_html.baue_staedte(ziel)
+    assert gesamt == 7, (
+        f"Ein Exit-Code ausserhalb von EXIT_RANG ({gesamt} statt 7) ist "
+        f"stillschweigend verlorengegangen. Unbekanntes muss gewinnen."
+    )
+
+
+def test_ohne_besonderheit_bleibt_es_bei_null(ziel, ohne_marker):
+    """Gegenprobe: die Rangfolge darf keinen Grund erfinden, wo keiner ist."""
+    assert export_html.baue_staedte(ziel) == 0
+
+
+# ── Interne Kommentare gehoeren nicht in die ausgelieferte Seite ─────────────
+#
+# Nebenbefund vom 17.08.2026. Die Vorlagen sind ausfuehrlich kommentiert, und
+# das soll so bleiben. Ausgeliefert wurden die Kommentare bis hierher mit,
+# samt interner Kennungen und samt der Beschreibung frueherer Schwaechen — im
+# Quelltext der Wartungsseite stand woertlich, welche Fassung "bis hierher die
+# IP jedes Besuchers an Google weitergegeben" hat. Behoben ist das alles; eine
+# oeffentliche Seite muss ihre eigene Fehlerhistorie trotzdem nicht
+# mitliefern.
+
+# Muster, die in einer ausgelieferten Seite nichts zu suchen haben.
+INTERNE_SPUREN = (
+    r"\bT-\d+\b",                    # Todo-Kennungen
+    r"\b[AHKMSCI]-\d+\b",            # Abhilfen und Befunde
+    r"\bDSFA\b",
+    r"\bBefund\b",
+    r"\bAbhilfe\b",
+)
+
+
+def _interne_spuren(text: str) -> list[str]:
+    treffer = []
+    for muster in INTERNE_SPUREN:
+        treffer += [f"{muster}: {m.group(0)}" for m in re.finditer(muster, text)]
+    return treffer
+
+
+@pytest.mark.parametrize("slug", [s.slug for s in export_html.STAEDTE])
+def test_stadtseite_liefert_keine_internen_kennungen_aus(ziel, ohne_marker, slug):
+    export_html.baue_staedte(ziel)
+    seite = (ziel / slug / "index.html").read_text(encoding="utf-8")
+    assert "<!--" not in seite, (
+        f"Die Seite {slug}/index.html enthaelt noch HTML-Kommentare. "
+        f"ohne_interne_kommentare laeuft nicht auf diesem Weg."
+    )
+    spuren = _interne_spuren(seite)
+    assert not spuren, (
+        f"Die ausgelieferte Seite {slug}/index.html nennt interne Kennungen: "
+        f"{spuren[:5]}"
+    )
+
+
+def test_startseite_liefert_keine_internen_kennungen_aus(ziel, ohne_marker):
+    export_html.baue_staedte(ziel)
+    seite = (ziel / "index.html").read_text(encoding="utf-8")
+    assert "<!--" not in seite
+    assert not _interne_spuren(seite)
+
+
+def test_die_vorlagen_behalten_ihre_kommentare(ohne_marker):
+    """Die Gegenprobe, und sie ist die wichtigere Haelfte. Entfernt wird beim
+    Bauen, nicht in der Quelle — sonst geht die Begruendung verloren, warum
+    eine Stelle so aussieht, wie sie aussieht."""
+    for datei in (export_html.MAINTENANCE_PATH, export_html.TEMPLATE,
+                  export_html.STARTSEITE_VORLAGE):
+        inhalt = datei.read_text(encoding="utf-8")
+        assert "<!--" in inhalt, (
+            f"{datei.name} hat keine Kommentare mehr. Sie sollen in der "
+            f"Vorlage stehenbleiben und nur aus dem Ergebnis verschwinden."
+        )
+
+
+def test_kommentarfilter_schneidet_nichts_ausserhalb_von_kommentaren(ziel, ohne_marker):
+    """Die beiden Voraussetzungen, unter denen der Filter sicher ist.
+
+    Er arbeitet mit Mustern und nicht mit einem echten Zerteiler fuer HTML,
+    CSS und JavaScript. Das traegt genau solange, wie diese zwei Annahmen
+    stimmen — deshalb stehen sie hier und nicht nur im Kommentar.
+    """
+    # 1. Kein "<!--" oder "-->" in einem Skript- oder Stilblock. Sonst wuerde
+    #    das mehrzeilige HTML-Muster dort echten Inhalt abschneiden.
+    for datei in (export_html.MAINTENANCE_PATH, export_html.TEMPLATE,
+                  export_html.STARTSEITE_VORLAGE):
+        inhalt = datei.read_text(encoding="utf-8")
+        for block in re.finditer(r"<(script|style)\b[^>]*>(.*?)</\1>",
+                                 inhalt, re.S | re.I):
+            assert "<!--" not in block.group(2) and "-->" not in block.group(2), (
+                f"{datei.name}: ein {block.group(1)}-Block enthaelt "
+                f"Kommentar-Zeichen. ohne_interne_kommentare wuerde dort "
+                f"echten Inhalt abschneiden."
+            )
+
+    # 2. Keine mehrzeilige Zeichenkette in Schraegstrich-Anfuehrung, deren
+    #    Zeile mit "/*" oder "//" beginnt. Nur dort koennte der Code-Filter
+    #    eine Zeile fuer einen Kommentar halten, die keiner ist.
+        for literal in re.finditer(r"`(?:[^`\\]|\\.)*`", inhalt, re.S):
+            for zeile in literal.group(0).split("\n"):
+                assert not zeile.lstrip().startswith(("/*", "//")), (
+                    f"{datei.name}: eine mehrzeilige Zeichenkette hat eine "
+                    f"Zeile, die mit einem Kommentarzeichen beginnt "
+                    f"({zeile.strip()[:60]!r}). Der Code-Filter wuerde sie "
+                    f"entfernen und damit echten Inhalt."
+                )
+
+    # Und die Seite muss nach dem Filtern noch vollstaendig sein.
+    export_html.baue_staedte(ziel)
+    for slug in [s.slug for s in export_html.STAEDTE] + [""]:
+        seite = (ziel / slug / "index.html").read_text(encoding="utf-8")
+        assert seite.rstrip().endswith("</html>"), f"{slug or 'Startseite'} abgeschnitten"
+        assert "</body>" in seite and "</style>" in seite, (
+            f"{slug or 'Startseite'}: Struktur unvollstaendig nach dem Filtern")
+
+
+def test_kommentarfilter_laesst_zeichenketten_mit_schraegstrichen_in_ruhe(ziel, ohne_marker):
+    """Die naheliegende Verschlimmbesserung waere, jedes '//' zu entfernen
+    statt nur die am Zeilenanfang. Dann fiele die Haelfte jeder Adresse weg —
+    die Datenlizenz, die Kartenkacheln, jeder Verweis nach draussen."""
+    export_html.baue_staedte(ziel)
+    seite = (ziel / "berlin" / "index.html").read_text(encoding="utf-8")
+    assert "https://" in seite, (
+        "Aus der ausgelieferten Seite sind die Adressen verschwunden. Der "
+        "Code-Filter greift zu weit: er darf nur Kommentare am Zeilenanfang "
+        "entfernen."
+    )
+    assert "govdata.de" in seite, "Die Datenlizenz fehlt in der Fusszeile"

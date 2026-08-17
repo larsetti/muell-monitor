@@ -9,21 +9,14 @@
 <link rel="icon" type="image/x-icon" href="../assets/favicon.ico">
 <link rel="apple-touch-icon" sizes="180x180" href="../assets/apple-touch-icon.png">
 <meta property="og:title" content="Müll-Monitor · Datenbasiertes Hotspot-Monitoring">
-<!-- T-67 (15.08.2026): Der Vorschautext sagte bis heute, die Erfassung laufe
-     im Hintergrund weiter. Seit dem 22.04.2026 traf das nicht mehr zu, und er
-     ging in jede Verlinkung in Messengern und sozialen Netzen mit. Der alte
-     Wortlaut steht bewusst nicht hier, sondern nur im Bericht S-06 vom
-     15.08.2026: er wandert sonst als Zitat in jede gebaute Stadtseite. -->
+
 <meta property="og:description" content="Die öffentliche Ansicht ist derzeit nicht verfügbar. Die Berliner Quelle liefert seit dem 22.04.2026 keine neuen Meldungen.">
 <meta property="og:image" content="../assets/og-card.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
-<!-- A-12 (DSFA 28.07.2026): Schrift lokal statt von fonts.googleapis.com.
-     Auch die Wartungsseite hat bis hierher die IP jedes Besuchers an Google
-     weitergegeben, obwohl sie gar keine Daten zeigt. Beschafft mit
-     vendor_assets.py, Prüfsumme mit sri.py. -->
+
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self'; base-uri 'none'; form-action 'none'">
-<link rel="stylesheet" href="../assets/vendor/fonts/montserrat.css" integrity="sha384-kFV7xmVJC1MMNBo4x272m09uJdm6iEqyQCVdmbSSlys1oxgWcYqxrM19hE2TLm+5" crossorigin="anonymous"/>
+<link rel="stylesheet" href="../assets/vendor/fonts/montserrat.css" integrity="sha384-HP57U9x1R3yeqcpgSTHnvrxJP26nppS3oSxavqVlf7ndruJnPdzeuPLcR8AZFzJw" crossorigin="anonymous"/>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
@@ -80,14 +73,6 @@ p {
   margin-bottom: 18px;
   color: #cbd5e0;
 }
-/* T-67 (15.08.2026): Das Abzeichen war grün und der Punkt pulsierte, fest
-   verdrahtet und unabhängig davon, ob überhaupt etwas erfasst wird. Ein
-   Abzeichen, das immer grün ist, zeigt keinen Zustand an, es dekoriert. Seit
-   dem 22.04.2026 sagte es zudem das Gegenteil der Lage. Farbe und Punkt stehen
-   jetzt auf "ruht" und sind dieselben Werte wie STATUS_STIL["ruht"] in
-   export_html.py, damit die Berliner Stadtseite nicht anders aussieht als die
-   Wurzelseite. Wer hier wieder auf Grün geht, muss zeigen, woher der Zustand
-   kommt. */
 .status {
   display: inline-flex;
   align-items: center;
@@ -193,15 +178,7 @@ p {
   <div class="accent-bar"></div>
   <h2>Die öffentliche Ansicht ist derzeit nicht verfügbar.</h2>
   <p>Die Plattform befindet sich in einer Übergangs- und Entwicklungsphase. In dieser Zeit ist die interaktive Karte und Hotspot-Analyse vorübergehend nicht öffentlich erreichbar.</p>
-  <!-- T-67 (15.08.2026): Bis heute versprachen diese beiden Zeilen eine
-       tägliche Erfassung und einen laufend aktualisierten Bestand, dazu ein
-       grünes Abzeichen. Seit dem 22.04.2026 war das falsch, und es stand
-       öffentlich im Netz, weil index.html eine Kopie dieser Datei ist. Der alte
-       Wortlaut steht im Bericht S-06 vom 15.08.2026 und absichtlich nicht hier,
-       sonst zöge das Zitat in jede gebaute Stadtseite mit.
-       Diese beiden Zeilen sind zugleich ANKER_QUELLE und ANKER_STATUS in
-       export_html.py. Wer sie umformuliert, zieht die Anker dort mit, sonst
-       bricht der Bau der Stadtseiten ab. Das ist Absicht. -->
+  
   <p>Grundlage sind die offen bereitgestellten Meldungen des Berliner Ordnungsamts. Diese Quelle liefert seit dem 22.04.2026 keine neuen Meldungen. Der erfasste Bestand bleibt erhalten, er wächst bis auf Weiteres nicht weiter.</p>
   <div class="status">Quelle seit dem 22.04.2026 ohne neue Meldungen</div>
   <div class="footer">
@@ -235,11 +212,7 @@ p {
     <h3>Hinweis zum Datenschutz</h3>
     <p>Die Webseite befindet sich derzeit in einer Datenschutz-Überarbeitung. Müll-Monitor wertet öffentlich bereitgestellte Meldungen des Ordnungsamts (Open Data) aus. Diese Meldungen enthalten Angaben mit Ortsbezug (Straße, Postleitzahl, Geo-Koordinate), die im Einzelfall einen Personenbezug aufweisen können. Hausnummern und Klarnamen werden nicht gespeichert.</p>
     <p>Eine vollständige Datenschutzerklärung nach Art. 13 und 14 DSGVO wird mit der nächsten Veröffentlichung bereitgestellt.</p>
-    <!-- 03.08.2026: Hier stand bis heute ein unausgefüllter Platzhalter für den
-         Verantwortlichen — und zwar live, weil index.html eine Kopie dieser
-         Datei ist. Die Datenschutzerklärung vom 28.07.2026 hält das unter C.1
-         als zu ersetzen fest. Angaben jetzt nach B.1, Fassung bis zur
-         Beurkundung des Gesellschaftsvertrags (Ü-01). -->
+    
     <p>
       <strong>Verantwortlich:</strong><br>
       Lars Wittkopf, c/o MDC#279, Welserstraße 3, 87463 Dietmannsried<br>

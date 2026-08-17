@@ -424,6 +424,76 @@ def stand_fuer_anzeige(iso: str | None) -> str:
         return iso
 
 
+# HTML-Kommentare, einschliesslich mehrzeiliger. In keiner der Vorlagen steht
+# ein "<!--" oder "-->" innerhalb eines script- oder style-Blocks, das Muster
+# kann also nichts abschneiden, was kein Kommentar ist. Wer eine Vorlage
+# umbaut, prueft das mit -- der Test dazu haelt es fest.
+_KOMMENTAR = re.compile(r"<!--.*?-->", re.S)
+
+# Die Stil- und Skriptbloecke der Vorlagen sind ebenso ausfuehrlich
+# kommentiert wie das HTML drumherum, und die Kennungen stehen dort genauso.
+# In maintenance.html und template.html zusammen waren es 15 Stueck.
+_BLOCK_MIT_CODE = re.compile(r"<(style|script)\b[^>]*>(.*?)</\1>", re.S | re.I)
+
+# NUR Kommentare, die eine Zeile beginnen -- nach beliebig viel Einrueckung,
+# aber ohne Code davor. Das ist die Bauart jedes dokumentierenden Kommentars
+# in diesen Vorlagen und zugleich die einzige, die sich ohne einen echten
+# Zerteiler fuer CSS und JavaScript sicher erkennen laesst: ein "/*" oder "//"
+# mitten in einer Zeile kann in einer Zeichenkette stehen ("https://..." ist
+# der haeufigste Fall) und darf nicht angefasst werden.
+#
+# Die eine Luecke, die bleibt: eine mehrzeilige Zeichenkette in
+# Schraegstrich-Anfuehrung, deren Zeile mit "/*" oder "//" beginnt. In keiner
+# Vorlage gibt es das, und der Test dazu haelt es fest.
+_CODE_BLOCKKOMMENTAR = re.compile(r"^[ \t]*/\*.*?\*/[ \t]*\n?", re.S | re.M)
+_CODE_ZEILENKOMMENTAR = re.compile(r"^[ \t]*//[^\n]*\n?", re.M)
+
+
+def _code_kommentare_entfernen(treffer: re.Match) -> str:
+    ganz, tag, inhalt = treffer.group(0), treffer.group(1), treffer.group(2)
+    kopf = ganz[:ganz.index(inhalt)] if inhalt else ganz[:ganz.rindex(f"</{tag}")]
+    sauber = _CODE_ZEILENKOMMENTAR.sub("", _CODE_BLOCKKOMMENTAR.sub("", inhalt))
+    return f"{kopf}{sauber}</{tag}>"
+
+
+def ohne_interne_kommentare(html: str) -> str:
+    """Kommentare aus einer ausgelieferten Seite entfernen — HTML, CSS und JS.
+
+    Befund vom 17.08.2026. Die Kommentare in den Vorlagen sind ausfuehrlich,
+    und das ist gut so — sie sagen, warum eine Stelle so aussieht, wie sie
+    aussieht. Ausgeliefert wurden sie bis hierher mit, samt interner
+    Kennungen und samt der Beschreibung frueherer Schwaechen. Im Quelltext
+    der Wartungsseite stand woertlich, welche Fassung "bis hierher die IP
+    jedes Besuchers an Google weitergegeben" hat, dazu Verweise wie "A-12
+    (DSFA 28.07.2026)", "Bericht S-06" und "Befund H-04". Alles davon ist
+    behoben, und der Inhalt ist harmlos. Eine oeffentliche Seite muss ihre
+    eigene Fehlerhistorie trotzdem nicht mitliefern: sie nennt Datumsstaende
+    und interne Ordnungsnummern, aus denen sich ablesen laesst, wann was
+    offen war.
+
+    ALLE Kommentare, nicht nur die mit Kennung. Eine Liste von Mustern
+    muesste jemand pflegen, und der erste Kommentar, der eine Schwaeche
+    beschreibt, ohne eine Kennung zu nennen, ginge still durch. Der Besucher
+    braucht keinen einzigen davon, die Vorlage behaelt jeden.
+
+    HTML, CSS UND JAVASCRIPT, weil die Kennungen in allen dreien stehen: 14 in
+    den Stil- und Skriptbloecken von template.html, eine im Stilblock von
+    maintenance.html. Ein Filter nur fuer HTML-Kommentare haette den
+    auffaelligsten Teil erwischt und den groesseren stehen gelassen.
+
+    Die Anker, an denen wartungsseite_fuer die Stadt-Texte einsetzt, sind
+    echte HTML-Elemente und keine Kommentare — diese Funktion fasst sie nicht
+    an. Sie laeuft trotzdem erst NACH dem Einsetzen, damit die Reihenfolge
+    keine Rolle spielt.
+
+    Was sie NICHT ist: eine Verkleinerung der Seite. Dass die Wartungsseite
+    dabei um rund ein Fuenftel kuerzer wird, ist eine Nebenwirkung und kein
+    Zweck — es wird nichts zusammengezogen und nichts umbenannt.
+    """
+    return _BLOCK_MIT_CODE.sub(_code_kommentare_entfernen,
+                               _KOMMENTAR.sub("", html))
+
+
 def render_live(ziel: Path | None = None, praefix: str = "", stadt=None):
     """Rendert die Live-Karte aus der DB.
 
@@ -456,6 +526,7 @@ def render_live(ziel: Path | None = None, praefix: str = "", stadt=None):
     html = tmpl.replace('__APP_DATA_PLACEHOLDER__', compact).replace('__LAST_UPDATE__', last_update_str)
     if praefix:
         html = mit_asset_praefix(html, praefix)
+    html = ohne_interne_kommentare(html)
     ziel = ziel or OUT_PATH
     ziel.parent.mkdir(parents=True, exist_ok=True)
     ziel.write_text(html, encoding='utf-8')
@@ -471,7 +542,8 @@ def _schreibe_wenn_abweichend(inhalt: str) -> bool:
 def _wartungsseite_schreiben() -> int:
     """Schreibt die Wartungsseite nach OUT_PATH. 0 normal, 2 mit Fallback."""
     if MAINTENANCE_PATH.exists():
-        wartung = MAINTENANCE_PATH.read_text(encoding='utf-8')
+        wartung = ohne_interne_kommentare(
+            MAINTENANCE_PATH.read_text(encoding='utf-8'))
         # Idempotent: nur schreiben, wenn index.html abweicht oder fehlt.
         if _schreibe_wenn_abweichend(wartung):
             print(f"  Wartungsseite nach {OUT_PATH.name} geschrieben.")
@@ -764,7 +836,11 @@ def wartungsseite_fuer(stadt: Stadt, praefix: str = "../") -> str:
         html, ANKER_LIZENZ,
         f'Daten: <a href="{stadt.lizenz_url}" target="_blank">{stadt.lizenz_text}</a>',
         "die Datenlizenz")
-    return mit_asset_praefix(html, praefix) if praefix else html
+    html = mit_asset_praefix(html, praefix) if praefix else html
+    # Erst hier, nach allen Ersetzungen: die Anker sind echte HTML-Elemente,
+    # aber so bleibt die Reihenfolge auch dann richtig, wenn spaeter jemand
+    # einen Kommentar-Anker einfuehrt.
+    return ohne_interne_kommentare(html)
 
 
 def _stil_und_recht_aus_der_wartungsseite() -> tuple[str, str]:
@@ -861,6 +937,7 @@ def baue_startseite(ziel: Path, staedte: tuple[Stadt, ...] = STAEDTE) -> None:
                 f"mehr als 1 wird an einer Stelle eingesetzt, die kein "
                 f"Platzhalter sein sollte.")
         html = html.replace(platzhalter, ersatz, 1)
+    html = ohne_interne_kommentare(html)
     ziel.mkdir(parents=True, exist_ok=True)
     (ziel / "index.html").write_text(html, encoding="utf-8")
     print(f"  Startseite geschrieben: {ziel / 'index.html'} "
@@ -932,6 +1009,31 @@ def baue_stadt(stadt: Stadt, ziel: Path) -> int:
     return 0
 
 
+# Rangfolge der Exit-Codes, aufsteigend nach Gewicht des Grundes. Gebraucht
+# wird sie in baue_staedte, das aus mehreren Stadt-Codes einen machen muss.
+#
+# Befund K-11 der Abnahme vom 15.08.2026: dort stand max(codes), und der
+# Docstring nannte das "der schwerste". Das trifft nicht zu, weil die Zahlen
+# nach Erscheinen vergeben wurden und nicht nach Gewicht. Sind beide Marker
+# gesetzt und Köln hat keine Daten, liefert Berlin 3 (Rechtstexte nicht
+# freigegeben) und Köln 4 (keine Daten) — zurückgegeben wurde 4, also der
+# harmlosere der beiden Gründe, und der schwerere verschwand aus dem
+# Protokoll.
+#
+# Warum 3 über 4 steht: Code 4 heißt, für eine Stadt ist noch nichts da. Code
+# 3 heißt, jemand hat den Freigabe-Schalter bewusst gesetzt, und die Seite
+# geht nur deshalb nicht live, weil die Rechtstexte noch nicht anwaltlich
+# freigegeben sind (T-25 / T-40). Das ist der Zustand, den man im Protokoll
+# sehen will. Auf die Seiten selbst wirkt sich nichts davon aus — beide
+# schreiben ohnehin die Wartungsseite, und die Launcher werten den Code nicht
+# aus. Es geht allein um Nachvollziehbarkeit.
+EXIT_RANG = {0: 0, 4: 1, 2: 2, 3: 3}
+# Ein Code, den diese Zuordnung nicht kennt, gewinnt absichtlich gegen alle
+# bekannten. Wer später einen fünften Grund einführt und hier nicht nachzieht,
+# bekommt ihn zu sehen statt ihn stillschweigend zu verlieren.
+EXIT_RANG_UNBEKANNT = 99
+
+
 def baue_staedte(ziel: Path, staedte: tuple[Stadt, ...] = STAEDTE) -> int:
     """Baut Startseite und die übergebenen Städte nach ziel.
 
@@ -939,7 +1041,8 @@ def baue_staedte(ziel: Path, staedte: tuple[Stadt, ...] = STAEDTE) -> int:
     und die Tests des Gerüsts weiter alles; der ausgelieferte Weg übergibt
     dagegen nur die veröffentlichten Städte (T-74).
 
-    Exit-Code ist der schwerste.
+    Rückgabewert ist der Code mit dem schwersten Grund, nicht der größte —
+    siehe EXIT_RANG darüber.
     """
     print(f"Baue Städte-Struktur nach {ziel}")
     codes = [baue_stadt(stadt, ziel) for stadt in staedte]
@@ -950,7 +1053,8 @@ def baue_staedte(ziel: Path, staedte: tuple[Stadt, ...] = STAEDTE) -> int:
         print("  HINWEIS: Der alte Marker LIVE_FREIGEGEBEN liegt noch da. In "
               "dieser Struktur schaltet er nichts mehr frei — jede Stadt hat "
               "ihren eigenen Schalter.")
-    return max(codes, default=0)
+    return max(codes, key=lambda c: EXIT_RANG.get(c, EXIT_RANG_UNBEKANNT),
+               default=0)
 
 
 def baue_ausgeliefert(ziel: Path) -> int:
