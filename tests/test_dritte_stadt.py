@@ -36,23 +36,26 @@ Klasse, deshalb steht die Probe hier vor dem Import und nicht danach.
 
 Belegt mit einer Mutationsprobe, nicht mit gruenen Tests
 --------------------------------------------------------
-Gruen allein sagt nichts. Zwoelf Rueckbauten der geprueften Sperren sind
-einzeln eingebaut und gefahren worden, **zehn** meldet diese Datei rot. Die
-ersten drei Fassungen des Freitext-, des Sperr- und des Rueckhalte-Tests waren
-dabei WERTLOS und sind daran aufgefallen — sie konnten gar nicht rot werden.
-Was daran falsch war, steht jeweils im Test.
+Gruen allein sagt nichts. Vierzehn Rueckbauten der geprueften Sperren sind
+einzeln eingebaut und gefahren worden, **alle vierzehn** meldet diese Datei rot
+(17.08.2026, gegen eine vollstaendige Kopie mit Assets). Die ersten Fassungen des
+Bildadressen-, des Sperr- und des Rueckhalte-Tests waren dabei WERTLOS und sind
+genau daran aufgefallen — sie konnten gar nicht rot werden. Was daran falsch war,
+steht jeweils im Test.
 
-Zwei Rueckbauten bleiben gruen, beide bewusst:
+Dabei ist eine Luecke im BAU herausgekommen, die kein Test des Projekts
+bewachte: streicht man ``stadt=self.stadt`` aus dem Aufruf des Freitextfilters
+in ``quellen.Open311Quelle.aufbereiten``, blieben alle 372 Tests gruen. Jede
+Stadt bekaeme dann den Berliner Regelsatz statt ihres eigenen. Heute folgenlos,
+weil Koeln seinen Freitext nicht uebernimmt — scharf, sobald eine Stadt ihn
+uebernimmt. Bewacht jetzt von
+``test_der_eigene_regelsatz_einer_stadt_erreicht_den_filter_auch``.
 
-  * Das Durchreichen der Stadt an den Freitextfilter
-    (``entschaerfe(..., stadt=self.stadt)``) laesst sich HIER nicht pruefen und
-    das ist richtig so: ``probstadt`` hat keinen eigenen Regelsatz, also liefern
-    der ausdrueckliche Aufruf und die Vorgabe dasselbe Regelwerk. Unterscheidbar
-    wird der Rueckbau erst an einer Stadt MIT eigenem Satz — die Gesamtsuite
-    meldet ihn mit 34 Fehlschlaegen.
-  * Die Plausibilitaetsschwelle traegt bei Bonner Dichte nicht mehr. Das ist
-    keine Luecke im Test, sondern eine gemessene Luecke im Bau; sie steht als
-    eigener Test am Ende dieser Datei.
+Ein Rueckbau bleibt bewusst gruen: die Plausibilitaetsschwelle traegt bei Bonner
+Dichte nicht mehr. Das ist keine Luecke im Test, sondern eine gemessene Luecke
+im Bau, und sie ist nicht im Alleingang zu schliessen — die Schwelle einer Stadt
+gehoert an deren eigene Daten gemessen. Sie steht als eigener Test am Ende
+dieser Datei, damit sie nicht in Vergessenheit geraet.
 
 Alle Beispieltexte sind erfunden. Echte Buerger-Freitexte gehoeren nicht in
 einen oeffentlichen Code-Speicher.
@@ -213,6 +216,55 @@ def test_eine_unbekannte_stadt_bekommt_den_freitextfilter_und_nicht_keinen():
     assert regeln == betreff_filter.regeln_fuer("berlin"), (
         "Die Vorgabe fuer eine unbekannte Stadt soll der geprueften Berliner "
         "Satz sein — schwaecher als noetig ist besser als offen."
+    )
+
+
+def test_der_eigene_regelsatz_einer_stadt_erreicht_den_filter_auch():
+    """Dass eine Stadt ihren EIGENEN Regelsatz bekommt, war unbewacht.
+
+    Gefunden in der Mutationsprobe zu dieser Datei: streicht man
+    ``stadt=self.stadt`` aus dem Aufruf von ``betreff_filter.entschaerfe`` in
+    ``quellen.Open311Quelle.aufbereiten``, bleiben **alle 372 Tests, die es vor
+    diesem Test gab, gruen** (gemessen am 17.08.2026 an einer vollstaendigen
+    Kopie mit Assets; mit ihm sind es 373, und genau einer wird rot).
+    Jede Stadt bekaeme dann den Berliner Satz.
+
+    Heute ist das folgenlos, weil Koeln seinen Freitext gar nicht uebernimmt und
+    das kontrollierte Vokabular der Stadt keine Kennzeichen enthaelt. Es wird in
+    dem Moment scharf, in dem eine Stadt Freitext uebernimmt — und genau das
+    steht bei Bonn zur Entscheidung, falls die Stadt keine durchgaengige
+    Kategorie mitliefert. Dann fielen die Zusatzregeln der Stadt
+    (Kfz-Kennzeichen, Mailadressen, Telefonnummern) still aus.
+
+    Geprueft an Koeln, weil es die einzige Stadt mit eigenem Satz ist. Das
+    Kennzeichen ist erfunden.
+    """
+    text = "Schrottrad neben Wagen K-AB 123 abgestellt"
+
+    # Der Berliner Satz kennt keine Kennzeichen, der Koelner schon. Faellt
+    # dieser Unterschied weg, ist der Rueckbau nicht mehr erkennbar — dann ist
+    # diese Zeile rot und nicht die Zusicherung darunter.
+    assert "kennzeichen" not in betreff_filter.treffer(text, "berlin")
+    assert "kennzeichen" in betreff_filter.treffer(text, "koeln"), (
+        "Der Koelner Zusatzregelsatz erkennt kein Kfz-Kennzeichen mehr."
+    )
+
+    koeln = quellen.KOELN
+    meldung = prob_meldung(1, code="1.1", name="Wilder Müll", beschreibung=text)
+    original = koeln.freitext_uebernehmen
+    try:
+        # Nur fuer diese Probe den Freitext uebernehmen, damit er ueberhaupt in
+        # den Filter laeuft. Der Verzicht bleibt die echte Einstellung.
+        koeln.freitext_uebernehmen = True
+        satz = koeln.aufbereiten(meldung, "2026-08-17T00:00:00")
+    finally:
+        koeln.freitext_uebernehmen = original
+
+    assert "K-AB 123" not in satz["betreff"], (
+        f"Das Kennzeichen steht im Betreff: {satz['betreff']!r}. Der Aufruf von "
+        f"betreff_filter.entschaerfe in quellen.Open311Quelle.aufbereiten muss "
+        f"die Stadt mitgeben (stadt=self.stadt), sonst gilt fuer jede Stadt der "
+        f"Berliner Satz und ihre eigenen Zusatzregeln laufen ins Nichts."
     )
 
 
