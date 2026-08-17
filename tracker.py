@@ -445,6 +445,61 @@ def _fristen_anwenden(conn) -> dict:
     return fristen
 
 
+def _zellen_auflagen_nachziehen(conn, stadt: str) -> dict:
+    """A-2 und A-7 ueber den bestehenden Zellenbestand ziehen. Nur Loeschungen.
+
+    Herausgeloest unter T-55 (17.08.2026), weil dieser Nachlauf an ZWEI Stellen
+    gebraucht wird: am Ende von berechne_hotspots und im Leerpfad von run(). Es
+    darf genau eine Fassung davon geben, sonst laufen die beiden Wege
+    auseinander, sobald jemand eine der Regeln anfasst.
+
+    Warum der Leerpfad ihn ueberhaupt braucht: bis hierher sass die
+    A-2-Bereinigung ausschliesslich in berechne_hotspots, und run() kehrt bei
+    einem leeren Abruf vorher zurueck. Damit hing eine Auflage der
+    Folgenabschaetzung daran, dass eine fremde Schnittstelle antwortet — genau
+    der Fehler, den Befund H-01 am 29.07.2026 fuer die Loeschfristen behoben
+    hat. Aufgefallen ist es, weil 2.909 Berliner Einzelfall-Zellen im Bestand
+    lagen: Berlin liefert seit dem 22.04.2026 nichts mehr, also lief die
+    Bereinigung dort nie. Weggeraeumt hat sie am 15.08.2026 ein Koelner Lauf,
+    der stadtblind mitbereinigte — das war der Fehler, den T-66 behoben hat.
+    Nach T-66 haette Berlin sie fuer immer behalten.
+
+    BEWUSST NUR LOESCHEN, NIE ANLEGEN. Ein Neuaufbau der Zellen aus einem
+    leeren Abruf ist genau das, was Befund H-02b verbietet: die Pipeline wuerde
+    ueber altem Bestand weiterrechnen und das Ergebnis als frisch ausgeben.
+    Loeschen ist in die sichere Richtung — es kann nichts offenlegen.
+
+    Die beiden Regeln haben mit Absicht unterschiedliche Reichweite:
+
+      A-2 ist stadtscharf ('AND stadt = ?'). Eine Stadt raeumt nur ihren
+      eigenen Bestand auf, siehe T-66 und tests/test_zellen_stadtscharf.py.
+      Berlins Quelle ist tot; was ein fremder Lauf dort wegnimmt, ist weg.
+
+      A-7 ist stadtblind, und das ist keine vergessene Haelfte von T-66. Eine
+      Zell-Kennung ist eine gerundete Koordinate und weltweit eindeutig, die
+      Zweitschrift sperrliste.txt fuehrt keine Stadt, und Berlin laeuft nicht
+      mehr — mit Stadt-Filter wuerde ein Berliner Widerspruch von keinem Lauf
+      mehr vollzogen. Ausfuehrlich in sperrliste.laden() und in
+      test_zellen_stadtscharf.py::test_sperre_greift_auch_bei_fremdem_stadtlauf.
+
+    sperrliste.laden() steht hier, weil die Funktion allein tragen muss: der
+    Leerpfad hat keinen vorherigen Aufruf, und nur ueber laden() wirkt ein
+    Widerspruch, der nach einem Rechnerwechsel bloss noch in der Zweitschrift
+    steht. Der Aufruf ist idempotent, der zweite aus berechne_hotspots also
+    unschaedlich.
+    """
+    sperrliste.laden(conn)
+    einzelfall = conn.execute(
+        "DELETE FROM hotspots WHERE meldungen_count < ? AND stadt = ?",
+        (HOTSPOT_MIN_PERSIST, stadt)
+    ).rowcount
+    gesperrt = conn.execute(
+        "DELETE FROM hotspots WHERE cluster_id IN (SELECT cluster_id FROM sperrliste)"
+    ).rowcount
+    conn.commit()
+    return {"einzelfall": einzelfall, "gesperrt": gesperrt}
+
+
 def berechne_hotspots(conn, quelle) -> dict:
     """Zellen einer Stadt aus ihrem Meldungsbestand neu berechnen.
 
@@ -468,13 +523,35 @@ def berechne_hotspots(conn, quelle) -> dict:
         if cid not in clusters:
             clusters[cid] = {
                 "lats": [], "lons": [], "dates": [],
-                "bezirk": row["bezirk"], "recurrence": 0,
+                "bezirke": [], "recurrence": 0,
                 "adressen": []
             }
         c = clusters[cid]
         c["lats"].append(row["lat"])
         c["lons"].append(row["lon"])
         c["dates"].append(row["datum"])
+        # K-12 (T-68, 17.08.2026): Der Bezirk wurde bis hierher aus der ERSTEN
+        # Meldung der Zelle uebernommen, waehrend die Strasse ein paar Zeilen
+        # weiter unten als Mehrheitswert bestimmt wird. Ist die erste Meldung
+        # eine ohne Stadtteil, blieb die ganze Zelle ohne — auch wenn ihre
+        # uebrigen Meldungen ihn tragen.
+        #
+        # GEMESSEN am 15.08.2026: von den 281 Koelner Zellen ab drei Meldungen
+        # ohne Bezirk fuehren 185 den Stadtteil in einer anderen ihrer eigenen
+        # Meldungen, also 66 Prozent. Mit der Mehrheitsregel faellt die Zahl
+        # leerer Zellen von 281 auf 96 (8,1 auf 2,8 Prozent). Berlin ist nicht
+        # betroffen, dort ist keine Zelle leer.
+        #
+        # DATENSCHUTZRECHTLICH FOLGENLOS, und das ist der Grund, warum es so
+        # und nicht anders gemacht wird: es entsteht kein neues Datum, ein
+        # bereits gespeichertes wird nur richtig ausgewaehlt. Der naheliegende
+        # zweite Weg — den Stadtteil aus der Postleitzahl ableiten — waere neue
+        # Ortsinformation erzeugen statt vorhandene lesen und muesste durch die
+        # Risikobewertung. Deshalb bleibt open311.zerlege_adresse unangetastet:
+        # die Bauart "50739 Koeln, Wilensteinweg 13" fuehrt schlicht keinen
+        # Stadtteil, der Parser uebersieht nichts.
+        if row["bezirk"]:
+            c["bezirke"].append(row["bezirk"])
         if row["strasse"]:
             c["adressen"].append((row["strasse"], row["plz"] or ""))
 
@@ -524,6 +601,14 @@ def berechne_hotspots(conn, quelle) -> dict:
         else:
             best_strasse, best_plz = "", ""
 
+        # K-12: derselbe Mehrheitsweg für den Bezirk, siehe die Begründung beim
+        # Sammeln oben. Leere Werte sind gar nicht erst eingesammelt worden —
+        # eine Zelle bleibt also nur dann ohne Bezirk, wenn ihn KEINE ihrer
+        # Meldungen führt. Dort ist "Adresse unvollständig" die ehrliche
+        # Anzeige und bleibt stehen (96 Kölner Zellen).
+        bester_bezirk = (Counter(c["bezirke"]).most_common(1)[0][0]
+                         if c["bezirke"] else None)
+
         conn.execute("""
             INSERT INTO hotspots
                 (cluster_id, lat_center, lon_center, bezirk, meldungen_count,
@@ -532,6 +617,14 @@ def berechne_hotspots(conn, quelle) -> dict:
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(cluster_id) DO UPDATE SET
                 stadt            = excluded.stadt,
+                -- K-12 (T-68, 17.08.2026): bezirk stand nicht in dieser Liste.
+                -- Damit haette die Mehrheitsregel nur fuer neu angelegte Zellen
+                -- gegolten, und die 185 Koelner Zellen, um die es geht, gibt es
+                -- laengst — die Aenderung waere folgenlos geblieben. Dieselbe
+                -- Falle wie bei first_seen unter M-02. Der Wert ist wie dort
+                -- bei jedem Lauf neu aus dem tatsaechlichen Bestand der Zelle
+                -- berechnet, es wird also nichts Aelteres ueberschrieben.
+                bezirk           = excluded.bezirk,
                 meldungen_count  = excluded.meldungen_count,
                 recurrence_count = excluded.recurrence_count,
                 last_seen        = excluded.last_seen,
@@ -547,7 +640,7 @@ def berechne_hotspots(conn, quelle) -> dict:
                 score_label      = excluded.score_label,
                 strasse          = excluded.strasse,
                 plz              = excluded.plz
-        """, (cid, lat_c, lon_c, c["bezirk"], len(c["dates"]),
+        """, (cid, lat_c, lon_c, bester_bezirk, len(c["dates"]),
               c["recurrence"], last, first, score, label,
               best_strasse, best_plz, quelle.stadt))
 
@@ -557,43 +650,13 @@ def berechne_hotspots(conn, quelle) -> dict:
     # Ohne diesen Schritt würden Zellen, die vor A-2/A-7 angelegt wurden oder
     # deren Meldungen die Löschroutine entfernt hat, unbegrenzt stehenbleiben.
     #
-    # T-66 (15.08.2026, Befund K-03): Diese Bereinigung lief bis hierher über
-    # ALLE Städte. Gemessen hat ein einziger Kölner Lauf die Berliner Zellen von
-    # 8.748 auf 5.839 gesenkt, während die Berliner Meldungen unangetastet
-    # blieben. Datenschutzrechtlich war jede einzelne dieser Löschungen richtig
-    # — die Zellen trugen weniger als HOTSPOT_MIN_PERSIST Meldungen und hätten
-    # nach A-2 nie liegen dürfen. Falsch war, WER sie gelöscht hat: eine Stadt
-    # räumt hier im Bestand einer anderen auf. Berlin ist dabei der Sonderfall,
-    # der aus dem Schönheitsfehler ein Risiko macht: die Berliner Quelle ist
-    # seit dem 22.04.2026 tot, es wird nie wieder einen Berliner Lauf geben, der
-    # eine zu Unrecht entfernte Zelle neu aufbaut. Würde HOTSPOT_MIN_PERSIST je
-    # angehoben, nähme ein Kölner Lauf Berlin unwiederbringlich Zellen weg.
-    entfernt_einzelfall = conn.execute(
-        "DELETE FROM hotspots WHERE meldungen_count < ? AND stadt = ?",
-        (HOTSPOT_MIN_PERSIST, quelle.stadt)
-    ).rowcount
-    # A-7 dagegen bleibt BEWUSST stadtblind, und das ist keine vergessene Hälfte
-    # von T-66, sondern die Bedingung dafür, dass ein Widerspruch nach Art. 21
-    # DSGVO überhaupt wirkt. Dieselbe Begründung trägt schon sperrliste.laden():
-    #
-    #   1. Eine Zell-Kennung ist eine auf ~150 m gerundete Koordinate und damit
-    #      weltweit eindeutig. Zwei Städte können sich in derselben Zelle nicht
-    #      begegnen — ein Stadt-Filter hätte hier nichts zu trennen, er könnte
-    #      nur etwas übersehen.
-    #   2. Die ausfallsichere Zweitschrift sperrliste.txt führt KEINE Stadt.
-    #      Jeder von dort zurückgespielte Eintrag trägt den Vorgabewert
-    #      'berlin'. Mit einem Stadt-Filter fiele ein so wiederhergestellter
-    #      Widerspruch bei jedem Kölner Lauf still aus der Sperre heraus.
-    #   3. Berlin läuft nicht mehr. Ein Widerspruch gegen eine Berliner Zelle
-    #      würde mit Stadt-Filter von keinem Lauf mehr vollzogen — die Zeile
-    #      bliebe stehen, obwohl ihr ausdrücklich widersprochen wurde.
-    #
-    # Zu breit sperren kann keine Daten offenlegen, zu eng sperren schon. Die
-    # Richtung des Fehlers entscheidet. Bewacht von
-    # test_staedte.py::test_sperre_greift_auch_bei_fremdem_stadtlauf.
-    entfernt_gesperrt = conn.execute(
-        "DELETE FROM hotspots WHERE cluster_id IN (SELECT cluster_id FROM sperrliste)"
-    ).rowcount
+    # Die beiden Löschungen stehen seit T-55 (17.08.2026) in
+    # _zellen_auflagen_nachziehen, weil der Leerpfad von run() sie ebenfalls
+    # braucht. Dort steht auch, warum A-2 stadtscharf und A-7 stadtblind ist
+    # (T-66, Befund K-03) — die Unterscheidung ist tragend, nicht kosmetisch.
+    nachlauf = _zellen_auflagen_nachziehen(conn, quelle.stadt)
+    entfernt_einzelfall = nachlauf["einzelfall"]
+    entfernt_gesperrt = nachlauf["gesperrt"]
     # Verwaiste Zellen: keine Meldung mehr im Bestand (Folge der Löschroutine).
     # T-49: NUR die Zellen dieser Stadt prüfen. clusters enthält ausschließlich
     # Zellen aus dem Bestand dieser Stadt — ohne den Filter gälte jede Zelle einer
@@ -669,6 +732,18 @@ def run(stadt: str = None, zeitraum=None):
         # vollständigen Abruf, sonst gälte der Ausfall als Massenwegfall.
         _betreffe_nachziehen(conn)
         _fristen_anwenden(conn)
+        # A-2 / A-7 (T-55, 17.08.2026): dieselbe Lehre eine Auflage weiter.
+        # Die Zellen-Bereinigung sass ausschliesslich in berechne_hotspots, und
+        # dorthin kommt dieser Pfad nie. Damit stand auch sie still, solange
+        # eine Quelle nicht antwortet — bei Berlin seit dem 22.04.2026
+        # dauerhaft. Nur die Loeschungen, KEIN Neuaufbau der Zellen: der braucht
+        # einen vollstaendigen Abruf (H-02b).
+        zellen = _zellen_auflagen_nachziehen(conn, quelle.stadt)
+        log.info("Zellen-Bereinigung nach leerem Abruf [%s]: %d Einzelfall-Zellen "
+                 "entfernt (nur %s, A-2), %d gesperrte entfernt "
+                 "(stadtuebergreifend, A-7); kein Neuaufbau",
+                 quelle.stadt, zellen["einzelfall"], quelle.stadt,
+                 zellen["gesperrt"])
         conn.close()
         return 1
 
