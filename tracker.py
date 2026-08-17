@@ -108,6 +108,21 @@ K_ANONYMITY_THRESHOLD = 3
 # Wiederkehr-Zählers und können später zu einer echten Zelle zusammenwachsen.
 HOTSPOT_MIN_PERSIST = 2
 
+# T-75: Bremse für die Angleichung der Zellwerte an den Meldungsbestand. Fielen
+# mehr als dieser Anteil der Zellen einer Stadt auf einen Schlag unter
+# HOTSPOT_MIN_PERSIST, ist die wahrscheinlichere Erklärung ein unvollständiger
+# Bestand (halb eingespielte Sicherung, abgebrochene Migration) und nicht eine
+# echte Löschung. Dann wird nichts angeglichen und der Lauf sagt es laut.
+# Gemessen am 17.08.2026 am echten Bestand: 34 von 5.839 Berliner Zellen, also
+# 0,6 Prozent. Der Wert lässt also den Betriebsfall weit passieren und fängt
+# nur den Unfall. Gleiche Bauart wie retention.FEED_MAX_ABGANG_ANTEIL.
+ZELLEN_MAX_ABGANG_ANTEIL = 0.2
+# Sockel darunter: bei einem kleinen Zellenbestand sagt ein Anteil nichts. Ohne
+# ihn spränge die Bremse bei einem Bestand von einer Zelle schon an, wenn genau
+# diese eine Zelle zu Recht fällt — eine Bremse, die bei "eins von eins" hält,
+# ist eine Sperre. Erst ab dieser Zahl gefallener Zellen wird der Anteil geprüft.
+ZELLEN_ABGANG_SOCKEL = 20
+
 # Tage bis zur "regulären" Entsorgung (Berliner Realität)
 DISPOSAL_DAYS = 14
 
@@ -445,8 +460,220 @@ def _fristen_anwenden(conn) -> dict:
     return fristen
 
 
+def _zellen_aus_bestand(conn, quelle) -> dict:
+    """Die Zellen EINER Stadt aus ihrem gespeicherten Meldungsbestand rechnen.
+
+    Reine Lesefunktion, sie schreibt nichts. Herausgelöst unter T-75, weil zwei
+    Stellen dieselbe Rechnung brauchen: berechne_hotspots legt daraus die Zellen
+    an, und _zaehler_angleichen hält die schon vorhandenen an der Wirklichkeit.
+    Zwei Fassungen davon wären derselbe Fehler wie bei den Löschungen unter T-55.
+
+    T-49: nur der Bestand dieser Stadt. Die Zellen der anderen Städte werden von
+    deren eigenem Lauf gepflegt und dürfen hier weder neu berechnet noch als
+    verwaist eingestuft werden.
+    """
+    muell_rows = conn.execute("""
+        SELECT id, datum, lat, lon, bezirk, strasse, plz
+        FROM meldungen
+        WHERE is_muell=1 AND lat IS NOT NULL AND lon IS NOT NULL AND stadt=?
+        ORDER BY datum ASC
+    """, (quelle.stadt,)).fetchall()
+
+    clusters: dict[str, dict] = {}
+    for _id, datum, lat, lon, bezirk, strasse, plz in muell_rows:
+        cid = cluster_id(lat, lon)
+        if cid not in clusters:
+            clusters[cid] = {
+                "lats": [], "lons": [], "dates": [],
+                "bezirke": [], "recurrence": 0,
+                "adressen": []
+            }
+        c = clusters[cid]
+        c["lats"].append(lat)
+        c["lons"].append(lon)
+        c["dates"].append(datum)
+        # K-12 (T-68, 17.08.2026): Der Bezirk wurde bis dahin aus der ERSTEN
+        # Meldung der Zelle übernommen, während die Straße als Mehrheitswert
+        # bestimmt wird. Ist die erste Meldung eine ohne Stadtteil, blieb die
+        # ganze Zelle ohne — auch wenn ihre übrigen Meldungen ihn tragen.
+        #
+        # GEMESSEN am 15.08.2026: von den 281 Kölner Zellen ab drei Meldungen
+        # ohne Bezirk führen 185 den Stadtteil in einer anderen ihrer eigenen
+        # Meldungen, also 66 Prozent. Mit der Mehrheitsregel fällt die Zahl
+        # leerer Zellen von 281 auf 96 (8,1 auf 2,8 Prozent). Berlin ist nicht
+        # betroffen, dort ist keine Zelle leer.
+        #
+        # DATENSCHUTZRECHTLICH FOLGENLOS, und das ist der Grund, warum es so
+        # und nicht anders gemacht wird: es entsteht kein neues Datum, ein
+        # bereits gespeichertes wird nur richtig ausgewählt. Der naheliegende
+        # zweite Weg — den Stadtteil aus der Postleitzahl ableiten — wäre neue
+        # Ortsinformation erzeugen statt vorhandene lesen und müsste durch die
+        # Risikobewertung. Deshalb bleibt open311.zerlege_adresse unangetastet:
+        # die Bauart "50739 Köln, Wilensteinweg 13" führt schlicht keinen
+        # Stadtteil, der Parser übersieht nichts.
+        if bezirk:
+            c["bezirke"].append(bezirk)
+        if strasse:
+            c["adressen"].append((strasse, plz or ""))
+
+    # T-49: das Wiederkehr-Fenster gehoert der Stadt, nicht dem Modul. Der
+    # Berliner Wert (14 Tage Abfuhr plus 7 Tage Puffer) beschreibt den Berliner
+    # Reinigungsrhythmus und ist auf eine andere Stadt nicht uebertragbar —
+    # siehe quellen.py, wo je Stadt steht, worauf der Wert beruht.
+    fenster = quelle.wiederkehr_fenster_tage
+    for cid, c in clusters.items():
+        dates_sorted = sorted(c["dates"])
+        for i in range(1, len(dates_sorted)):
+            try:
+                d1 = datetime.fromisoformat(dates_sorted[i-1][:10])
+                d2 = datetime.fromisoformat(dates_sorted[i][:10])
+                gap = (d2 - d1).days
+                if 0 < gap <= fenster:
+                    c["recurrence"] += 1
+            except Exception:
+                pass
+    return clusters
+
+
+def _zellwerte(c: dict) -> dict:
+    """Die gespeicherten Felder EINER Zelle aus ihren Meldungen ableiten.
+
+    Ebenfalls unter T-75 herausgelöst. Wichtig ist, dass hier ALLE abgeleiteten
+    Felder zusammen entstehen: Zähler, Wiederkehr, Score und die beiden Daten
+    hängen an derselben Meldungsmenge. Wer nur den Zähler nachführt und den
+    Score stehen lässt, hat den Fehler bloß verschoben — siehe M-02, wo genau
+    das für first_seen aufgefallen ist.
+    """
+    dates_sorted = sorted(c["dates"])
+    first, last = dates_sorted[0], dates_sorted[-1]
+    try:
+        days_age = (datetime.utcnow() - datetime.fromisoformat(first[:10])).days
+    except Exception:
+        days_age = 0
+    score, label = compute_score(len(c["dates"]), c["recurrence"], days_age)
+
+    # Häufigste Adresse im Cluster ableiten
+    if c["adressen"]:
+        best_strasse, best_plz = Counter(c["adressen"]).most_common(1)[0][0]
+    else:
+        best_strasse, best_plz = "", ""
+
+    # K-12: derselbe Mehrheitsweg für den Bezirk, siehe die Begründung beim
+    # Sammeln in _zellen_aus_bestand. Leere Werte sind gar nicht erst
+    # eingesammelt worden — eine Zelle bleibt also nur dann ohne Bezirk, wenn
+    # ihn KEINE ihrer Meldungen führt. Dort ist "Adresse unvollständig" die
+    # ehrliche Anzeige und bleibt stehen (96 Kölner Zellen).
+    return {
+        "lat_center": sum(c["lats"]) / len(c["lats"]),
+        "lon_center": sum(c["lons"]) / len(c["lons"]),
+        "bezirk": (Counter(c["bezirke"]).most_common(1)[0][0]
+                   if c["bezirke"] else None),
+        "meldungen_count": len(c["dates"]),
+        "recurrence_count": c["recurrence"],
+        "last_seen": last,
+        "first_seen": first,
+        "score": score,
+        "score_label": label,
+        "strasse": best_strasse,
+        "plz": best_plz,
+    }
+
+
+def _zaehler_angleichen(conn, stadt: str) -> dict:
+    """T-75: die gespeicherten Zellwerte an den Meldungsbestand angleichen,
+    ausschließlich nach unten.
+
+    DER BEFUND: meldungen_count wurde nur in berechne_hotspots geschrieben, und
+    dorthin kommt eine Stadt ohne antwortende Quelle nie. Die Löschroutine
+    dagegen läuft bei JEDEM Lauf und über ALLE Städte (A-4, Befund H-01). Also
+    schrumpfte der Bestand, während der Zähler stehenblieb. Gemessen am
+    17.08.2026 gegen eine Kopie der Betriebsdatenbank: 555 der 5.839 Berliner
+    Zellen nannten mehr Meldungen, als es sie noch gab, drei von ihnen hatten
+    gar keine mehr. Köln, dessen Quelle antwortet, war zellgenau richtig.
+
+    Das ist derselbe Fehlertyp wie T-55 und wie Befund H-01: eine Regel, die
+    nur beim Neuberechnen stimmt, ist bei einer toten Quelle dauerhaft falsch.
+
+    NUR NACH UNTEN, und das ist die ganze Verträglichkeit mit H-02b. Ein
+    gestiegener Zähler hieße, dass aus altem Bestand etwas Neues gerechnet und
+    als frisch ausgegeben wird — das verbietet H-02b. Ein gesunkener Zähler ist
+    das Gegenteil: die Zelle behauptet weniger, und behaupten kann nur zu viel
+    schaden. Deshalb steht in jedem UPDATE zusätzlich 'AND meldungen_count > ?'.
+    Es wird auch keine Zelle angelegt, nur vorhandene fortgeschrieben.
+
+    STADTSCHARF, wie A-2 daneben (T-66). Jede Stadt gleicht bei ihrem eigenen
+    täglichen Lauf ihren eigenen Bestand an — auch Berlin, das seit dem
+    22.04.2026 nur noch den Leerpfad geht. Ein fremder Lauf fasst sie nicht an,
+    denn eine Angleichung kann eine Zelle unter HOTSPOT_MIN_PERSIST drücken und
+    damit löschen lassen, und Berlins Zellen sind nicht wieder aufbaubar.
+    """
+    quelle = quellen.hole(stadt)
+    clusters = _zellen_aus_bestand(conn, quelle)
+    bestand = {r[0]: r[1] for r in conn.execute(
+        "SELECT cluster_id, meldungen_count FROM hotspots WHERE stadt = ?",
+        (stadt,))}
+
+    faellig = {}
+    for cid, alt in bestand.items():
+        c = clusters.get(cid)
+        neu = len(c["dates"]) if c else 0
+        if neu < (alt or 0):
+            faellig[cid] = (c, alt, neu)
+
+    wuerden_fallen = sum(1 for (_c, _alt, neu) in faellig.values()
+                         if neu < HOTSPOT_MIN_PERSIST)
+    grenze = max(ZELLEN_ABGANG_SOCKEL,
+                 int(len(bestand) * ZELLEN_MAX_ABGANG_ANTEIL))
+    if bestand and wuerden_fallen > grenze:
+        log.error(
+            "Zellen-Angleichung [%s] abgebrochen: %d von %d Zellen fielen auf "
+            "einmal unter %d Meldungen, erlaubt sind %d (%d Prozent). Der "
+            "Zellenbestand bleibt unangetastet. Ursache pruefen: ist der "
+            "Meldungsbestand vollstaendig, oder wurde eine halbe Sicherung "
+            "eingespielt?",
+            stadt, wuerden_fallen, len(bestand), HOTSPOT_MIN_PERSIST, grenze,
+            int(ZELLEN_MAX_ABGANG_ANTEIL * 100))
+        return {"angeglichen": 0, "geleert": 0, "abgebrochen": True,
+                "wuerden_fallen": wuerden_fallen}
+
+    geleert = 0
+    for cid, (c, _alt, neu) in faellig.items():
+        if c is None:
+            # Keine einzige Meldung mehr in dieser Zelle. Der Zähler geht auf
+            # null; weggeräumt wird sie unmittelbar danach von der A-2-Löschung,
+            # die dieselbe Stadt-Grenze einhält.
+            conn.execute(
+                "UPDATE hotspots SET meldungen_count = 0 "
+                "WHERE cluster_id = ? AND stadt = ? AND meldungen_count > 0",
+                (cid, stadt))
+            geleert += 1
+            continue
+        w = _zellwerte(c)
+        conn.execute("""
+            UPDATE hotspots SET
+                lat_center = ?, lon_center = ?, bezirk = ?, meldungen_count = ?,
+                recurrence_count = ?, last_seen = ?, first_seen = ?,
+                score = ?, score_label = ?, strasse = ?, plz = ?
+            WHERE cluster_id = ? AND stadt = ? AND meldungen_count > ?
+        """, (w["lat_center"], w["lon_center"], w["bezirk"], w["meldungen_count"],
+              w["recurrence_count"], w["last_seen"], w["first_seen"], w["score"],
+              w["score_label"], w["strasse"], w["plz"], cid, stadt, neu))
+    conn.commit()
+    if faellig:
+        log.info("Zellen-Angleichung [%s]: %d Zellen auf ihren tatsaechlichen "
+                 "Bestand gesenkt, davon %d ohne jede Meldung",
+                 stadt, len(faellig), geleert)
+    return {"angeglichen": len(faellig), "geleert": geleert,
+            "abgebrochen": False, "wuerden_fallen": wuerden_fallen}
+
+
 def _zellen_auflagen_nachziehen(conn, stadt: str) -> dict:
-    """A-2 und A-7 über den bestehenden Zellenbestand ziehen. Nur Löschungen.
+    """A-2 und A-7 über den bestehenden Zellenbestand ziehen.
+
+    Löschungen, und seit T-75 (17.08.2026) davor die Angleichung der Zähler an
+    den tatsächlichen Meldungsbestand — die ebenfalls nur nach unten geht und
+    keine Zelle anlegt. Warum sie hier und nicht erst in berechne_hotspots
+    steht, begründet _zaehler_angleichen.
 
     Herausgeloest unter T-55 (17.08.2026), weil dieser Nachlauf an ZWEI Stellen
     gebraucht wird: am Ende von berechne_hotspots und im Leerpfad von run(). Es
@@ -488,6 +715,12 @@ def _zellen_auflagen_nachziehen(conn, stadt: str) -> dict:
     steht. Der Aufruf ist idempotent, der zweite aus berechne_hotspots also
     unschaedlich.
     """
+    # T-75: ZUERST die Zähler an den Bestand angleichen, dann erst löschen. Die
+    # A-2-Löschung darunter prüft 'meldungen_count < ?' — sie liest also den
+    # gespeicherten Zähler und nicht den Bestand. Solange der Zähler zu hoch
+    # steht, greift die Auflage genau bei den Zellen nicht, bei denen sie
+    # greifen müsste. Die Reihenfolge ist tragend, nicht kosmetisch.
+    angleichung = _zaehler_angleichen(conn, stadt)
     sperrliste.laden(conn)
     einzelfall = conn.execute(
         "DELETE FROM hotspots WHERE meldungen_count < ? AND stadt = ?",
@@ -497,7 +730,9 @@ def _zellen_auflagen_nachziehen(conn, stadt: str) -> dict:
         "DELETE FROM hotspots WHERE cluster_id IN (SELECT cluster_id FROM sperrliste)"
     ).rowcount
     conn.commit()
-    return {"einzelfall": einzelfall, "gesperrt": gesperrt}
+    return {"einzelfall": einzelfall, "gesperrt": gesperrt,
+            "angeglichen": angleichung["angeglichen"],
+            "angleichung_abgebrochen": angleichung["abgebrochen"]}
 
 
 def berechne_hotspots(conn, quelle) -> dict:
@@ -507,70 +742,9 @@ def berechne_hotspots(conn, quelle) -> dict:
     Rechnung benutzt statt einer zweiten Fassung davon. Fachlich unveraendert.
     """
     # ── Hotspot-Berechnung ────────────────────────────────────────────────────
-    # T-49: nur der Bestand dieser Stadt. Die Zellen der anderen Staedte werden
-    # von deren eigenem Lauf gepflegt und duerfen hier weder neu berechnet noch
-    # als verwaist eingestuft werden.
-    muell_rows = conn.execute("""
-        SELECT id, datum, lat, lon, bezirk, strasse, plz
-        FROM meldungen
-        WHERE is_muell=1 AND lat IS NOT NULL AND lon IS NOT NULL AND stadt=?
-        ORDER BY datum ASC
-    """, (quelle.stadt,)).fetchall()
-
-    clusters: dict[str, dict] = {}
-    for row in muell_rows:
-        cid = cluster_id(row["lat"], row["lon"])
-        if cid not in clusters:
-            clusters[cid] = {
-                "lats": [], "lons": [], "dates": [],
-                "bezirke": [], "recurrence": 0,
-                "adressen": []
-            }
-        c = clusters[cid]
-        c["lats"].append(row["lat"])
-        c["lons"].append(row["lon"])
-        c["dates"].append(row["datum"])
-        # K-12 (T-68, 17.08.2026): Der Bezirk wurde bis hierher aus der ERSTEN
-        # Meldung der Zelle übernommen, während die Straße ein paar Zeilen
-        # weiter unten als Mehrheitswert bestimmt wird. Ist die erste Meldung
-        # eine ohne Stadtteil, blieb die ganze Zelle ohne — auch wenn ihre
-        # uebrigen Meldungen ihn tragen.
-        #
-        # GEMESSEN am 15.08.2026: von den 281 Kölner Zellen ab drei Meldungen
-        # ohne Bezirk führen 185 den Stadtteil in einer anderen ihrer eigenen
-        # Meldungen, also 66 Prozent. Mit der Mehrheitsregel fällt die Zahl
-        # leerer Zellen von 281 auf 96 (8,1 auf 2,8 Prozent). Berlin ist nicht
-        # betroffen, dort ist keine Zelle leer.
-        #
-        # DATENSCHUTZRECHTLICH FOLGENLOS, und das ist der Grund, warum es so
-        # und nicht anders gemacht wird: es entsteht kein neues Datum, ein
-        # bereits gespeichertes wird nur richtig ausgewaehlt. Der naheliegende
-        # zweite Weg — den Stadtteil aus der Postleitzahl ableiten — wäre neue
-        # Ortsinformation erzeugen statt vorhandene lesen und müsste durch die
-        # Risikobewertung. Deshalb bleibt open311.zerlege_adresse unangetastet:
-        # die Bauart "50739 Köln, Wilensteinweg 13" führt schlicht keinen
-        # Stadtteil, der Parser übersieht nichts.
-        if row["bezirk"]:
-            c["bezirke"].append(row["bezirk"])
-        if row["strasse"]:
-            c["adressen"].append((row["strasse"], row["plz"] or ""))
-
-    # T-49: das Wiederkehr-Fenster gehoert der Stadt, nicht dem Modul. Der
-    # Berliner Wert (14 Tage Abfuhr plus 7 Tage Puffer) beschreibt den Berliner
-    # Reinigungsrhythmus und ist auf eine andere Stadt nicht uebertragbar —
-    # siehe quellen.py, wo je Stadt steht, worauf der Wert beruht.
-    fenster = quelle.wiederkehr_fenster_tage
-    for cid, c in clusters.items():
-        dates_sorted = sorted(c["dates"])
-        for i in range(1, len(dates_sorted)):
-            try:
-                d1 = datetime.fromisoformat(dates_sorted[i-1][:10])
-                d2 = datetime.fromisoformat(dates_sorted[i][:10])
-                gap = (d2 - d1).days
-                if 0 < gap <= fenster:
-                    c["recurrence"] += 1
-            except Exception:
-                pass
+    # Die Rechnung selbst steht seit T-75 in _zellen_aus_bestand, weil die
+    # Angleichung im Leerpfad dieselbe braucht.
+    clusters = _zellen_aus_bestand(conn, quelle)
 
     gesperrt = sperrliste.laden(conn)
     uebersprungen_einzelfall = 0
@@ -582,32 +756,8 @@ def berechne_hotspots(conn, quelle) -> dict:
         if len(c["dates"]) < HOTSPOT_MIN_PERSIST:
             uebersprungen_einzelfall += 1
             continue
-        lat_c = sum(c["lats"]) / len(c["lats"])
-        lon_c = sum(c["lons"]) / len(c["lons"])
-        dates_sorted = sorted(c["dates"])
-        first = dates_sorted[0]
-        last  = dates_sorted[-1]
-        try:
-            days_age = (datetime.utcnow() - datetime.fromisoformat(first[:10])).days
-        except Exception:
-            days_age = 0
-
-        score, label = compute_score(len(c["dates"]), c["recurrence"], days_age)
-
-        # Häufigste Adresse im Cluster ableiten
-        if c["adressen"]:
-            most_common = Counter(c["adressen"]).most_common(1)[0][0]
-            best_strasse, best_plz = most_common
-        else:
-            best_strasse, best_plz = "", ""
-
-        # K-12: derselbe Mehrheitsweg für den Bezirk, siehe die Begründung beim
-        # Sammeln oben. Leere Werte sind gar nicht erst eingesammelt worden —
-        # eine Zelle bleibt also nur dann ohne Bezirk, wenn ihn KEINE ihrer
-        # Meldungen führt. Dort ist "Adresse unvollständig" die ehrliche
-        # Anzeige und bleibt stehen (96 Kölner Zellen).
-        bester_bezirk = (Counter(c["bezirke"]).most_common(1)[0][0]
-                         if c["bezirke"] else None)
+        # T-75: dieselbe Ableitung, die die Angleichung im Leerpfad benutzt.
+        w = _zellwerte(c)
 
         conn.execute("""
             INSERT INTO hotspots
@@ -640,9 +790,10 @@ def berechne_hotspots(conn, quelle) -> dict:
                 score_label      = excluded.score_label,
                 strasse          = excluded.strasse,
                 plz              = excluded.plz
-        """, (cid, lat_c, lon_c, bester_bezirk, len(c["dates"]),
-              c["recurrence"], last, first, score, label,
-              best_strasse, best_plz, quelle.stadt))
+        """, (cid, w["lat_center"], w["lon_center"], w["bezirk"],
+              w["meldungen_count"], w["recurrence_count"], w["last_seen"],
+              w["first_seen"], w["score"], w["score_label"],
+              w["strasse"], w["plz"], quelle.stadt))
 
     conn.commit()
 
