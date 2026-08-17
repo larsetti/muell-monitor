@@ -494,6 +494,127 @@ def ohne_interne_kommentare(html: str) -> str:
                                _KOMMENTAR.sub("", html))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Auslieferungs-Sperre (T-76, 17.08.2026)
+#
+# ohne_interne_kommentare räumt die Kommentare aus dem Ergebnis, und
+# test_kommentarfilter_schneidet_nichts_ausserhalb_von_kommentaren hält die zwei
+# Annahmen fest, unter denen sein Muster sicher ist. Damit lief die Prüfung im
+# Test — und ein Test greift nur, wenn ihn jemand laufen lässt. Der tägliche Bau
+# läuft ohne Test, unbeaufsichtigt, auf drei Wegen (GitHub Actions, Task
+# Scheduler, Pi-Crontab). Deshalb sieht der Bau jede fertige Seite selbst noch
+# einmal an, bevor er sie schreibt: dieselbe Stelle wie beim Wartungs-Lock und
+# bei der Rechtstext-Sperre, weil die Auslieferung der Moment ist, an dem es
+# zählt.
+#
+# Die Sperre prüft die GEBAUTE Seite, nicht die Vorlage. Die Vorlage soll ihre
+# Kommentare behalten; falsch ist erst das, was hinausgeht.
+#
+# Zwei Familien, beide ohne Pflegebedarf an einer Wortliste:
+#
+#   1. Kommentar-Reste. Kein "<!--" und kein "-->" darf übrigbleiben, und in
+#      keinem Stil- oder Skriptblock darf eine Zeile mit "/*" oder "//"
+#      beginnen. Das ist genau die Zusage des Filters, gegen das Ergebnis
+#      geprüft. Es fängt auch den Fall, den das Muster von sich aus nicht kann:
+#      ein geschachtelter Kommentar (<!-- a <!-- b -->) lässt ein " -->" stehen,
+#      und das ist Kommentartext, der als sichtbarer Inhalt hinausgeht.
+#   2. Interne Kennungen. Todo-Nummern, Befund- und Abhilfe-Kürzel, das Wort
+#      DSFA. Die stehen normalerweise in Kommentaren, aber nicht nur: ein
+#      Klassenname, ein Variablenname oder ein sichtbarer Satz in der
+#      Wartungsseite kann eine Kennung genauso hinaustragen, und davon merkt
+#      der Kommentarfilter nichts.
+#
+# Warum die eingebetteten Daten von 2. ausgenommen sind: sie sind kein
+# Vorlagentext und haben ihre eigenen Sperren (A-1, A-2, A-7, A-14). Gemessen
+# am 17.08.2026 über den Bestand: der Ersatztext des Betreff-Filters lautet
+# "Freitext entfernt (A-14)" und trägt damit selbst eine Kennung (11 Meldungen);
+# in Köln liegen Autobahnnamen wie A-4 und A-555 im Bereich des Möglichen, sobald
+# ein Straßenname sie nennt. Beides würde den täglichen Bau anhalten, ohne dass
+# etwas Internes hinausgegangen wäre. Der Betreff steht heute nicht in der
+# gebauten Seite (er liefert nur die Kategoriegruppe), die Straße dagegen schon.
+# Die Ausnahme ist die Vorsorge dafür.
+#
+# Was NICHT durch diese Sperre geht: FALLBACK_WARTUNG_HTML und die
+# Umlaut-Weiterleitung. Beide sind Konstanten im Code, keine gebauten Seiten,
+# und ein Test hält sie sauber. Vor allem aber ist die Ersatzseite die Abhilfe
+# selbst — würde sie an der Sperre hängenbleiben, stünde am Ende gar keine Seite
+# da, und das wäre die Umkehrung von A-11.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Muster, die in einer ausgelieferten Seite nichts zu suchen haben. Gleiche
+# Liste wie in tests\test_staedte.py (INTERNE_SPUREN) — dort blieb sie stehen,
+# damit der Test auch dann etwas prüft, wenn hier jemand ein Muster herausnimmt.
+INTERNE_KENNUNGEN = (
+    r"\bT-\d+\b",          # Todo-Kennungen
+    r"\b[AHKMSCI]-\d+\b",  # Abhilfen und Befunde der Audits
+    r"\bDSFA\b",
+    r"\bBefund\b",
+    r"\bAbhilfe\b",
+)
+
+
+class SeiteNichtAuslieferbar(RuntimeError):
+    """Eine fertig gebaute Seite trägt noch etwas Internes.
+
+    Eigene Klasse, damit sich der Grund im Protokoll von einem kaputten Anker
+    unterscheiden lässt. Am Verhalten ändert sie nichts: baue_ausgeliefert fängt
+    jeden Grund und schreibt die Ersatzseite (Exit-Code 2).
+    """
+
+
+def pruefe_ausgeliefert(html: str, wofuer: str, daten: str = "") -> None:
+    """Letzter Blick auf eine fertige Seite, bevor sie geschrieben wird.
+
+    ``wofuer`` benennt die Seite im Protokoll. ``daten`` ist der eingebettete
+    Datenblock, der von der Kennungsprüfung ausgenommen wird — siehe den
+    Abschnitt darüber.
+
+    Wirft SeiteNichtAuslieferbar. Fail-closed: die Seite wird dann nicht
+    geschrieben, und der aufrufende Weg schreibt an ihre Stelle die
+    Ersatz-Wartungsseite.
+    """
+    def abbruch(was: str, hinweis: str) -> None:
+        raise SeiteNichtAuslieferbar(
+            f"{wofuer}: {was}\n"
+            f"  {hinweis}\n"
+            f"  Diese Seite wird NICHT ausgeliefert. Die Vorlage darf ihre "
+            f"Kommentare behalten; entfernt wird beim Bauen "
+            f"(ohne_interne_kommentare). Wer hier landet, prüft, ob der Filter "
+            f"die Stelle erreicht — oder ob die Kennung ausserhalb eines "
+            f"Kommentars steht und in die Vorlage gar nicht gehört."
+        )
+
+    for zeichen in ("<!--", "-->"):
+        if zeichen in html:
+            abbruch(f"es steht noch ein {zeichen} in der gebauten Seite.",
+                    "Ein Kommentarrest, der als sichtbarer Inhalt hinausginge.")
+
+    # Zeilenweise und NICHT mit den Mustern des Filters. Ein Muster gegen sich
+    # selbst zu prüfen findet nur, was es ohnehin findet: _CODE_BLOCKKOMMENTAR
+    # braucht ein abschliessendes "*/", ein "/*" ohne Ende ist ihm unsichtbar,
+    # und _CODE_ZEILENKOMMENTAR kennt nur "//". Genau der Fall stand am
+    # 17.08.2026 hier und ging durch. Ein "*/" am Zeilenanfang zählt mit: dann
+    # begann der Kommentar mitten in einer Zeile, wo der Filter nicht ansetzt.
+    for block in _BLOCK_MIT_CODE.finditer(html):
+        for zeile in block.group(2).split("\n"):
+            if zeile.lstrip().startswith(("/*", "//", "*/")):
+                abbruch(
+                    f"im {block.group(1)}-Block beginnt eine Zeile mit einem "
+                    f"Kommentarzeichen: {zeile.strip()[:80]!r}",
+                    "Die Kennungen des Befunds vom 17.08.2026 standen genau "
+                    "dort — 14 in den Blöcken von template.html.")
+
+    ohne_daten = html.replace(daten, "", 1) if daten else html
+    for muster in INTERNE_KENNUNGEN:
+        treffer = [m.group(0) for m in re.finditer(muster, ohne_daten)]
+        if treffer:
+            abbruch(
+                f"die Seite nennt interne Kennungen: {sorted(set(treffer))[:6]}",
+                "Todo-Nummern, Befunde und Abhilfen sagen, wann was offen war. "
+                "Eine öffentliche Seite muss ihre eigene Fehlerhistorie nicht "
+                "mitliefern.")
+
+
 def render_live(ziel: Path | None = None, praefix: str = "", stadt=None):
     """Rendert die Live-Karte aus der DB.
 
@@ -528,6 +649,9 @@ def render_live(ziel: Path | None = None, praefix: str = "", stadt=None):
         html = mit_asset_praefix(html, praefix)
     html = ohne_interne_kommentare(html)
     ziel = ziel or OUT_PATH
+    # T-76: erst prüfen, dann schreiben. Der Datenblock ist ausgenommen, er ist
+    # kein Vorlagentext — siehe den Abschnitt bei pruefe_ausgeliefert.
+    pruefe_ausgeliefert(html, f"Live-Seite {ziel}", daten=compact)
     ziel.parent.mkdir(parents=True, exist_ok=True)
     ziel.write_text(html, encoding='utf-8')
     print(f"  Gespeichert: {ziel} (Stand der Daten: {last_update_str})")
@@ -541,26 +665,38 @@ def _schreibe_wenn_abweichend(inhalt: str) -> bool:
 
 def _wartungsseite_schreiben() -> int:
     """Schreibt die Wartungsseite nach OUT_PATH. 0 normal, 2 mit Fallback."""
+    grund = f"{MAINTENANCE_PATH.name} fehlt"
     if MAINTENANCE_PATH.exists():
         wartung = ohne_interne_kommentare(
             MAINTENANCE_PATH.read_text(encoding='utf-8'))
-        # Idempotent: nur schreiben, wenn index.html abweicht oder fehlt.
-        if _schreibe_wenn_abweichend(wartung):
-            print(f"  Wartungsseite nach {OUT_PATH.name} geschrieben.")
+        try:
+            pruefe_ausgeliefert(wartung, f"Wartungsseite {OUT_PATH}")
+        except SeiteNichtAuslieferbar as fehler:
+            # T-76: dieselbe Lage wie eine fehlende Wartungsquelle — es gibt
+            # keine auslieferbare Seite. Also dieselbe Abhilfe. Der Grund steht
+            # im Protokoll, der Exit-Code bleibt 2 ("Ersatzseite steht,
+            # nachsehen"), damit die Launcher weiter veröffentlichen.
+            print(f"  FEHLER: {fehler}")
+            grund = "die Wartungsseite ist nicht auslieferbar"
         else:
-            print(f"  {OUT_PATH.name} ist bereits die Wartungsseite, unverändert.")
-        return 0
+            # Idempotent: nur schreiben, wenn index.html abweicht oder fehlt.
+            if _schreibe_wenn_abweichend(wartung):
+                print(f"  Wartungsseite nach {OUT_PATH.name} geschrieben.")
+            else:
+                print(f"  {OUT_PATH.name} ist bereits die Wartungsseite, unverändert.")
+            return 0
     # A-11 / Sec M-02: harter Abbruch statt passivem Stehenlassen.
     # Ohne Wartungsquelle wird die eingebaute Fallback-Seite geschrieben,
     # damit eine eventuell vorhandene alte Live-index.html mit Cluster-IDs,
     # Straßen und Koordinaten nicht öffentlich stehenbleibt.
     if _schreibe_wenn_abweichend(FALLBACK_WARTUNG_HTML):
-        print(f"  FEHLER: {MAINTENANCE_PATH.name} fehlt. "
+        print(f"  FEHLER: {grund}. "
               f"Eingebaute Fallback-Wartungsseite nach {OUT_PATH.name} geschrieben.")
     else:
-        print(f"  FEHLER: {MAINTENANCE_PATH.name} fehlt. "
+        print(f"  FEHLER: {grund}. "
               f"{OUT_PATH.name} ist bereits die Fallback-Wartungsseite.")
-    print(f"  {MAINTENANCE_PATH.name} wiederherstellen, dann erneut ausführen. Exit-Code 2.")
+    print(f"  Ursache beheben ({MAINTENANCE_PATH.name}), dann erneut ausführen. "
+          f"Exit-Code 2.")
     return 2
 
 
@@ -840,7 +976,9 @@ def wartungsseite_fuer(stadt: Stadt, praefix: str = "../") -> str:
     # Erst hier, nach allen Ersetzungen: die Anker sind echte HTML-Elemente,
     # aber so bleibt die Reihenfolge auch dann richtig, wenn später jemand
     # einen Kommentar-Anker einführt.
-    return ohne_interne_kommentare(html)
+    html = ohne_interne_kommentare(html)
+    pruefe_ausgeliefert(html, f"Wartungsseite {stadt.name}")
+    return html
 
 
 def _stil_und_recht_aus_der_wartungsseite() -> tuple[str, str]:
@@ -938,6 +1076,7 @@ def baue_startseite(ziel: Path, staedte: tuple[Stadt, ...] = STAEDTE) -> None:
                 f"Platzhalter sein sollte.")
         html = html.replace(platzhalter, ersatz, 1)
     html = ohne_interne_kommentare(html)
+    pruefe_ausgeliefert(html, f"Startseite {ziel / 'index.html'}")
     ziel.mkdir(parents=True, exist_ok=True)
     (ziel / "index.html").write_text(html, encoding="utf-8")
     print(f"  Startseite geschrieben: {ziel / 'index.html'} "
@@ -1073,6 +1212,13 @@ def baue_ausgeliefert(ziel: Path) -> int:
     baut ausschliesslich die Städte aus ausgelieferte_staedte() (T-74). Eine
     zurückgehaltene Stadt bekommt hier keine Adresse, auch im Fehlerfall keine
     Ersatzseite — die Adresse soll ja gerade nicht antworten.
+
+    Hierher führt seit T-76 auch die Auslieferungs-Sperre: trägt eine fertige
+    Seite noch einen Kommentarrest oder eine interne Kennung, wirft
+    pruefe_ausgeliefert, und diese Klammer schreibt die Ersatzseite. Absichtlich
+    KEIN eigener Exit-Code: 2 sagt, was an den Adressen steht (die Ersatzseite),
+    und der Grund steht darüber im Protokoll. Ein fünfter Code müsste in
+    EXIT_RANG einsortiert werden, und die Launcher werten ihn ohnehin nicht aus.
     """
     staedte = ausgelieferte_staedte()
     try:

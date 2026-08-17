@@ -480,6 +480,177 @@ def test_kommentarfilter_schneidet_nichts_ausserhalb_von_kommentaren(ziel, ohne_
             f"{slug or 'Startseite'}: Struktur unvollständig nach dem Filtern")
 
 
+# ── T-76: die Sperre sitzt im Bau, nicht nur im Test ────────────────────────
+#
+# Die Tests darüber prüfen den Filter und seine zwei Annahmen. Sie greifen
+# genau solange, wie jemand sie laufen lässt — der tägliche Bau läuft ohne
+# Test, unbeaufsichtigt, auf drei Wegen. Seit dem 17.08.2026 sieht deshalb
+# export_html.pruefe_ausgeliefert jede fertige Seite selbst noch einmal an,
+# bevor sie geschrieben wird, und bricht fail-closed ab.
+#
+# Das Ergebnis eines Abbruchs ist dasselbe wie bei jedem anderen Baufehler:
+# baue_ausgeliefert schreibt an jeder ausgelieferten Adresse die Ersatzseite
+# und gibt Exit-Code 2 zurück. Absichtlich kein fünfter Code — 2 sagt, was an
+# den Adressen steht, und der Grund steht im Protokoll.
+
+
+def _wartungsquelle_mit(tmp_path, monkeypatch, einschub: str) -> Path:
+    """Kopiert die echte maintenance.html und setzt einschub vor </body>.
+
+    Die echte Vorlage, damit alle Anker und der Stilblock erhalten bleiben —
+    ein Testdokument von zehn Zeilen würde vorher an _ersetze_einmal scheitern
+    und damit am falschen Grund.
+    """
+    quelle = export_html.MAINTENANCE_PATH.read_text(encoding="utf-8")
+    assert "</body>" in quelle
+    kopie = tmp_path / "maintenance_mit_leck.html"
+    kopie.write_text(quelle.replace("</body>", f"{einschub}\n</body>", 1),
+                     encoding="utf-8")
+    monkeypatch.setattr(export_html, "MAINTENANCE_PATH", kopie)
+    return kopie
+
+
+def test_kennung_ausserhalb_eines_kommentars_haelt_die_auslieferung_an(
+        ziel, ohne_marker, tmp_path, monkeypatch):
+    """Der Fall, den der Kommentarfilter von sich aus nicht sehen kann.
+
+    Eine Kennung in sichtbarem Text ist kein Kommentar, also entfernt der
+    Filter sie nicht — und ohne diese Sperre ginge sie still hinaus.
+    """
+    _wartungsquelle_mit(tmp_path, monkeypatch,
+                        '<p class="hinweis">Siehe Befund H-04 (DSFA), T-40.</p>')
+
+    code = export_html.baue_ausgeliefert(ziel)
+
+    assert code == 2, (
+        f"Eine Kennung in der fertigen Seite muss den Bau anhalten und in die "
+        f"Ersatzseiten-Klammer laufen (Exit-Code 2), war {code}.")
+    seiten = [ziel / "index.html"]
+    seiten += [ziel / s.slug / "index.html"
+               for s in export_html.ausgelieferte_staedte()]
+    for seite in seiten:
+        inhalt = seite.read_text(encoding="utf-8")
+        assert inhalt == export_html.FALLBACK_WARTUNG_HTML, (
+            f"{seite} ist nicht die Ersatzseite. Fail-closed heißt: die "
+            f"undichte Seite wird nicht ausgeliefert, und an ihrer Stelle "
+            f"steht die Ersatzseite (A-11).")
+        assert "H-04" not in inhalt and "T-40" not in inhalt
+
+
+def test_kommentarrest_haelt_die_auslieferung_an():
+    """Geschachtelter Kommentar: der Filter kann ihn nicht vollständig.
+
+    "<!-- a <!-- b -->" verbraucht das erste Muster bis zum ersten "-->" und
+    lässt den Rest als sichtbaren Text stehen. Genau dagegen prüft die Sperre
+    auch auf "-->" und nicht nur auf "<!--".
+    """
+    roh = "<html><body><!-- innen <!-- tiefer --> Rest --></body></html>"
+    gefiltert = export_html.ohne_interne_kommentare(roh)
+    assert "-->" in gefiltert, (
+        "Ausgangslage nicht hergestellt: der Filter hat den geschachtelten "
+        "Kommentar diesmal vollständig entfernt.")
+    with pytest.raises(export_html.SeiteNichtAuslieferbar, match="-->"):
+        export_html.pruefe_ausgeliefert(gefiltert, "Testseite")
+
+
+def test_unbeendeter_blockkommentar_im_stilblock_haelt_die_auslieferung_an():
+    """Ohne abschliessendes "*/" findet das Blockmuster des Filters nichts, der
+    Kommentar bleibt stehen.
+
+    Bewusst OHNE Kennung im Text: sonst schlüge die Kennungsprüfung an und
+    dieser Zweig wäre ungeprüft. Gemessen am 17.08.2026 — mit "Befund H-04" im
+    Kommentar blieb die Prüfung der Code-Blöcke von keinem Test gedeckt.
+    """
+    roh = ("<html><head><style>\n/* kein Ende, und kein Wort darin ist eine "
+           "Kennung\n.a { color: red; }\n</style></head><body></body></html>")
+    gefiltert = export_html.ohne_interne_kommentare(roh)
+    assert "/*" in gefiltert, "Ausgangslage nicht hergestellt"
+    with pytest.raises(export_html.SeiteNichtAuslieferbar, match="style-Block"):
+        export_html.pruefe_ausgeliefert(gefiltert, "Testseite")
+
+
+def test_halb_abgeschnittener_blockkommentar_haelt_die_auslieferung_an():
+    """Beginnt ein Blockkommentar mitten in einer Zeile, setzt der Filter nicht
+    an — und die schliessende Zeile bleibt als "*/" stehen."""
+    roh = ("<html><head><style>\n.a { color: red; } /* Anfang mitten in der "
+           "Zeile\n  noch Text\n*/\n</style></head><body></body></html>")
+    gefiltert = export_html.ohne_interne_kommentare(roh)
+    with pytest.raises(export_html.SeiteNichtAuslieferbar, match="style-Block"):
+        export_html.pruefe_ausgeliefert(gefiltert, "Testseite")
+
+
+def test_eine_ungefilterte_seite_kommt_nicht_durch():
+    """Der Fall, für den die Sperre am Ende dasteht: ein neuer Bau-Weg, der
+    ohne_interne_kommentare vergisst. Die echte Wartungsvorlage, ungefiltert,
+    muss abgewiesen werden — und zwar schon an ihren Kommentaren."""
+    roh = export_html.MAINTENANCE_PATH.read_text(encoding="utf-8")
+    with pytest.raises(export_html.SeiteNichtAuslieferbar, match="<!--"):
+        export_html.pruefe_ausgeliefert(roh, "ungefilterte Wartungsvorlage")
+
+    # Und dieselbe Vorlage ohne ihre HTML-Kommentare, damit auch die
+    # Zeilenkommentare der Code-Blöcke geprüft sind: template.html hatte 14
+    # Stück davon, das ist der grössere Teil des Befunds vom 17.08.2026.
+    nur_html_entfernt = export_html._KOMMENTAR.sub("", roh)
+    with pytest.raises(export_html.SeiteNichtAuslieferbar):
+        export_html.pruefe_ausgeliefert(nur_html_entfernt, "halb gefiltert")
+
+
+def test_der_datenblock_ist_von_der_kennungspruefung_ausgenommen():
+    """Sonst hielte ein Kölner Autobahnname den täglichen Bau an.
+
+    A-4, A-3 und A-555 führen durch Köln. Steht so ein Name im Straßenfeld
+    einer Zelle, sieht das Muster für Befund-Kürzel eine Kennung. Der
+    Datenblock ist kein Vorlagentext und hat seine eigenen Sperren (A-1, A-2,
+    A-7, A-14).
+    """
+    daten = '{"hotspots":[{"strasse":"A-4 Auffahrt Klettenberg"}]}'
+    seite = f"<html><body><script>const D={daten};</script></body></html>"
+    export_html.pruefe_ausgeliefert(seite, "Testseite", daten=daten)
+    # Gegenprobe: ohne die Ausnahme schlägt genau dieselbe Seite an. Das hält
+    # fest, dass die Ausnahme wirkt und nicht bloß das Muster zahnlos ist.
+    with pytest.raises(export_html.SeiteNichtAuslieferbar, match="A-4"):
+        export_html.pruefe_ausgeliefert(seite, "Testseite")
+
+
+def test_die_eingebauten_seiten_kommen_durch_die_sperre():
+    """FALLBACK_WARTUNG_HTML und die Umlaut-Weiterleitung laufen bewusst NICHT
+    durch die Sperre — die Ersatzseite ist die Abhilfe selbst, sie darf nicht an
+    ihr hängenbleiben. Dass sie sauber sind, hält dieser Test fest."""
+    export_html.pruefe_ausgeliefert(export_html.FALLBACK_WARTUNG_HTML,
+                                    "Ersatz-Wartungsseite")
+
+
+def test_die_echten_gebauten_seiten_kommen_durch_die_sperre(ziel, ohne_marker):
+    """Gegenprobe zum Ganzen: die Sperre darf den Normalfall nicht anhalten."""
+    assert export_html.baue_staedte(ziel) == 0
+    for slug in [s.slug for s in export_html.STAEDTE] + [""]:
+        seite = (ziel / slug / "index.html").read_text(encoding="utf-8")
+        export_html.pruefe_ausgeliefert(seite, slug or "Startseite")
+
+
+def test_altweg_schreibt_die_ersatzseite_wenn_die_wartungsseite_leckt(
+        tmp_path, monkeypatch):
+    """Auch der Einzelseiten-Weg (--eine-seite) darf nichts Undichtes ablegen.
+
+    Er hat keine Ersatzseiten-Klammer um sich, also behandelt
+    _wartungsseite_schreiben den Fall wie eine fehlende Wartungsquelle: A-11,
+    Ersatzseite, Exit-Code 2.
+    """
+    _wartungsquelle_mit(tmp_path, monkeypatch, "<p>Abhilfe A-12 steht hier.</p>")
+    ausgabe = tmp_path / "index.html"
+    ausgabe.write_text("<html>ALTE LIVE-SEITE 52.50000_13.40000</html>",
+                       encoding="utf-8")
+    monkeypatch.setattr(export_html, "OUT_PATH", ausgabe)
+    monkeypatch.setattr(export_html, "GO_LIVE_MARKER", tmp_path / "gibt-es-nicht")
+
+    assert export_html.main() == 2
+    inhalt = ausgabe.read_text(encoding="utf-8")
+    assert inhalt == export_html.FALLBACK_WARTUNG_HTML, (
+        "Die alte Live-Seite mit Cluster-ID steht noch da. Eine nicht "
+        "auslieferbare Wartungsseite ist derselbe Fall wie eine fehlende "
+        "(A-11 / Sec M-02).")
+
+
 def test_kommentarfilter_laesst_zeichenketten_mit_schraegstrichen_in_ruhe(ziel, ohne_marker):
     """Die naheliegende Verschlimmbesserung wäre, jedes '//' zu entfernen
     statt nur die am Zeilenanfang. Dann fiele die Hälfte jeder Adresse weg —
