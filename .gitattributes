@@ -1,2 +1,21 @@
 # Shell-Skripte immer mit LF-Zeilenenden speichern (auch auf Windows)
 *.sh text eol=lf
+
+# Fremde Dateien unter assets/vendor/ werden byteweise unveraendert
+# ausgeliefert. Auf ihnen steht eine sha384-Pruefsumme in template.html
+# (Abhilfe A-12 der DSFA vom 28.07.2026), und render_live() bricht ab, wenn
+# eine davon nicht mehr passt.
+#
+# Ohne diese Zeile wandelt git beim Auschecken die Zeilenenden um, sobald
+# core.autocrlf gesetzt ist. Die Datei auf der Platte weicht dann von der
+# Datei ab, aus der die Pruefsumme berechnet wurde -- getroffen hat es
+# MarkerCluster.css und MarkerCluster.Default.css, die einzigen beiden
+# mitgelieferten Dateien mit echten Zeilenumbruechen. Die minifizierten
+# Fassungen haben keine und blieben deshalb unauffaellig. Im Arbeitsbestand,
+# in dem vendor_assets.py die Dateien geschrieben hatte, war alles gruen; rot
+# war es nur in einem frischen Klon, also genau dort, wo die Seite gebaut
+# wird. Aufgefallen unter T-71 am 17.08.2026, bestanden seit da3414b.
+#
+# -text schaltet jede Umwandlung ab, in beide Richtungen und unabhaengig
+# davon, wie core.autocrlf auf dem jeweiligen Rechner steht.
+assets/vendor/** -text
