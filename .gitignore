@@ -40,6 +40,16 @@ LIVE_FREIGEGEBEN_*
 # der Ordner bereits zum Commit vorgemerkt und wurde wieder herausgenommen.
 köln/
 
+# Köln wird vorläufig nicht veröffentlicht (T-74, Lars-Entscheidung
+# 17.08.2026). Der erste Riegel steckt im Bau: export_html.Stadt trägt
+# veroeffentlicht=False, damit entsteht die Seite gar nicht mehr und eine
+# vorhandene wird weggeräumt. Dies ist der zweite Riegel, für den Fall, dass
+# doch einmal ein koeln\index.html im Arbeitsbestand liegt — die Launcher
+# pushen mit "git add index.html */index.html", und dieses Muster nähme sie
+# stillschweigend wieder mit. Beim Zurückholen beide Riegel lösen: hier die
+# Zeile streichen UND veroeffentlicht auf True setzen.
+koeln/
+
 # Sperrliste nach Art. 21 DSGVO (A-7): Zweitschrift der gesperrten Ortszellen.
 # Gehoert NICHT ins oeffentliche Repository — eine Liste der ausgenommenen Zellen
 # liesse sich gegen die Karte halten und wuerde offenlegen, wo jemand

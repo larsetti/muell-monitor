@@ -115,13 +115,75 @@ def test_jeder_launcher_baut_die_staedte_struktur(name, tmp_path, monkeypatch):
     assert code == 0, f"{name}: Bau meldete Exit-Code {code}"
     assert not (tmp_path / "SOLL_NICHT_ENTSTEHEN.html").exists(), (
         f"{name} baut noch die alte Einzelseite statt der Städte-Struktur")
-    for stadt in export_html.STAEDTE:
+    # Geprüft wird gegen die ausgelieferten Städte, nicht gegen STAEDTE. Seit
+    # T-74 (17.08.2026) sind das zwei verschiedene Mengen: STAEDTE ist das
+    # vollständige Gerüst, ausgeliefert wird davon eine Auswahl.
+    for stadt in export_html.ausgelieferte_staedte():
         seite = tmp_path / stadt.slug / "index.html"
         assert seite.exists(), f"{name}: {stadt.name} wurde nicht gebaut"
     startseite = (tmp_path / "index.html").read_text(encoding="utf-8")
-    for stadt in export_html.STAEDTE:
+    for stadt in export_html.ausgelieferte_staedte():
         assert f'href="{stadt.slug}/"' in startseite, (
             f"{name}: Die Startseite verweist nicht auf /{stadt.slug}/")
+
+
+# ── T-74: eine zurückgehaltene Stadt darf der Bau nicht wieder anlegen ──────
+
+@pytest.mark.parametrize("name", sorted(LAUNCHER))
+def test_kein_launcher_baut_eine_zurueckgehaltene_stadt(name, tmp_path, monkeypatch):
+    """Der eigentliche Riegel hinter T-74.
+
+    Köln soll auf muell-monitor.de 404 liefern (Lars-Entscheidung 17.08.2026).
+    Die Datei aus dem Speicher zu nehmen reicht dafür nicht: bei GitHub Pages
+    ist der Speicher die Seite, und der tägliche Lauf baut die Stadtseiten neu
+    und pusht sie mit "git add */index.html". Ohne diesen Riegel wäre die
+    Adresse am Tag nach dem Entfernen wieder da.
+
+    Geprüft wird deshalb die Wirkung des echten Launcher-Aufrufs: keine Seite
+    und kein Verweis von der Startseite. Zusätzlich, dass eine vorhandene alte
+    Seite dabei weggeräumt wird — sonst bliebe genau die Fassung liegen, die
+    weg soll.
+    """
+    zurueckgehalten = [s for s in export_html.STAEDTE if not s.veroeffentlicht]
+    if not zurueckgehalten:
+        pytest.skip("derzeit wird keine Stadt zurückgehalten")
+
+    monkeypatch.setattr(export_html, "ROOT", tmp_path)
+    monkeypatch.setattr(export_html, "OUT_PATH", tmp_path / "SOLL_NICHT_ENTSTEHEN.html")
+    for stadt in zurueckgehalten:
+        alt = tmp_path / stadt.slug / "index.html"
+        alt.parent.mkdir(parents=True, exist_ok=True)
+        alt.write_text("<html>ALTE WARTUNGSSEITE</html>", encoding="utf-8")
+
+    export_html.cli(_aufrufe(_inhalt(name), "export_html.py")[0])
+
+    startseite = (tmp_path / "index.html").read_text(encoding="utf-8")
+    for stadt in zurueckgehalten:
+        assert not (tmp_path / stadt.slug / "index.html").exists(), (
+            f"{name}: {stadt.name} ist wieder gebaut worden, die Adresse "
+            f"/{stadt.slug}/ antwortet damit wieder")
+        assert f'href="{stadt.slug}/"' not in startseite, (
+            f"{name}: Die Startseite verweist auf /{stadt.slug}/, das 404 "
+            f"liefert")
+        umlaut = export_html.UMLAUT_PFADE.get(stadt.slug)
+        if umlaut:
+            assert not (tmp_path / umlaut / "index.html").exists(), (
+                f"{name}: /{umlaut}/ leitet auf eine Adresse weiter, die 404 "
+                f"liefert")
+
+
+def test_das_geruest_bleibt_vollstaendig():
+    """Zurückgehalten ist nicht zurückgebaut.
+
+    Die Städte-Struktur wird gebraucht, sobald die anwaltliche Freigabe (T-03)
+    da ist. T-74 nimmt eine Veröffentlichung weg, kein Merkmal — der Eintrag,
+    die Quelle und der eigene Freigabe-Schalter bleiben stehen.
+    """
+    slugs = {s.slug for s in export_html.STAEDTE}
+    assert {"berlin", "koeln"} <= slugs, (
+        f"Eine Stadt ist aus STAEDTE verschwunden, vorhanden: {sorted(slugs)}")
+    for slug in ("berlin", "koeln"):
+        assert slug in quellen.ALLE, f"{slug} hat keine Quelle mehr"
 
 
 @pytest.mark.parametrize("name", sorted(LAUNCHER))
@@ -343,12 +405,23 @@ def test_ohne_wartungsquelle_entsteht_die_ersatzseite(tmp_path, monkeypatch):
                    encoding="utf-8")
 
     assert export_html.cli([]) == 2
-    for seite in (tmp_path / "index.html", alt,
-                  tmp_path / "koeln" / "index.html"):
+    seiten = [tmp_path / "index.html"]
+    seiten += [tmp_path / s.slug / "index.html"
+               for s in export_html.ausgelieferte_staedte()]
+    assert alt in seiten, "Berlin muss unter den ausgelieferten Adressen sein"
+    for seite in seiten:
         inhalt = seite.read_text(encoding="utf-8")
         assert inhalt == export_html.FALLBACK_WARTUNG_HTML, (
             f"{seite} ist nicht die Ersatz-Wartungsseite")
         assert "52.5001_13.4001" not in inhalt
+    # T-74: eine zurückgehaltene Stadt bekommt auch im Fehlerfall keine
+    # Adresse. Eine Ersatzseite dort wäre wieder eine Antwort statt 404.
+    for stadt in export_html.STAEDTE:
+        if stadt.veroeffentlicht:
+            continue
+        assert not (tmp_path / stadt.slug / "index.html").exists(), (
+            f"{stadt.name} ist zurückgehalten, hat aber eine Ersatzseite "
+            f"bekommen")
 
 
 # ── Stadtseite und Quelle gehören zusammen ──────────────────────────────────

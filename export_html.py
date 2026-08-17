@@ -612,6 +612,14 @@ class Stadt:
     das False ist, bleibt es bei der Wartungsseite, auch wenn jemand den
     Freigabe-Schalter anlegt. Eine leere Karte zu veröffentlichen wäre
     schlimmer als gar keine.
+
+    veroeffentlicht ist eine andere Frage und liegt eine Ebene darüber (T-74,
+    17.08.2026): ob die Stadt überhaupt eine öffentlich erreichbare Adresse
+    bekommt. Auf False entsteht für sie keine Seite in der ausgelieferten
+    Struktur und keine Kachel auf der Startseite — auch keine Wartungsseite.
+    Der Eintrag in STAEDTE bleibt dabei vollständig stehen, ebenso Quelle,
+    Freigabe-Schalter und Tests. Zurückholen heißt: hier True setzen und die
+    Ignorier-Regel für den Ordner aus .gitignore nehmen.
     """
     slug: str
     name: str
@@ -625,6 +633,7 @@ class Stadt:
     kachel_marke: str
     kachel_marke_klasse: str
     karte_moeglich: bool
+    veroeffentlicht: bool = True
 
     @property
     def marker(self) -> Path:
@@ -653,6 +662,7 @@ STAEDTE = (
         kachel_marke="Archiv",
         kachel_marke_klasse="marke-archiv",
         karte_moeglich=True,
+        veroeffentlicht=True,
     ),
     Stadt(
         slug="koeln",
@@ -673,6 +683,15 @@ STAEDTE = (
         kachel_marke="In Vorbereitung",
         kachel_marke_klasse="marke-vorbereitung",
         karte_moeglich=False,
+        # T-74, Lars-Entscheidung 17.08.2026: Köln bekommt vorläufig keine
+        # öffentliche Adresse. Auf muell-monitor.de/koeln/ stand nur eine
+        # Wartungsseite ohne jede Ortsangabe, die Sperren hatten also gehalten.
+        # Sie ist trotzdem eine Vorankündigung gegenüber einer Stadt, mit der es
+        # noch keinen Kontakt gibt. Berlin ist bekannt und bleibt.
+        # Zurückholen (nach der anwaltlichen Freigabe, T-03): hier True setzen,
+        # "koeln/" aus .gitignore nehmen, bauen, pushen. Am Rest ist nichts zu
+        # tun — Quelle, Adapter, Freigabe-Schalter und Tests bleiben vollständig.
+        veroeffentlicht=False,
     ),
 )
 
@@ -772,13 +791,58 @@ def _kachel(stadt: Stadt) -> str:
             f'    </a>')
 
 
-def baue_startseite(ziel: Path) -> None:
+def ausgelieferte_staedte() -> tuple[Stadt, ...]:
+    """Die Städte, die eine öffentlich erreichbare Adresse bekommen (T-74).
+
+    STAEDTE ist die vollständige Struktur und bleibt es. Diese Auswahl ist die
+    Veröffentlichungsentscheidung darüber. Wer eine Stadt zurückhalten will,
+    setzt ihr veroeffentlicht auf False — und muss nichts am Gerüst anfassen.
+    """
+    return tuple(s for s in STAEDTE if s.veroeffentlicht)
+
+
+def entferne_zurueckgehaltene(ziel: Path, staedte: tuple[Stadt, ...]) -> None:
+    """Räumt die Adressen zurückgehaltener Städte aus dem Zielbaum.
+
+    Ohne diesen Schritt bliebe eine Seite, die einmal gebaut wurde, einfach
+    liegen — der Bau schreibt sie nur nicht mehr neu. Bei GitHub Pages ist der
+    Speicher die Seite, also wäre sie damit weiter öffentlich erreichbar, und
+    der nächste "git add */index.html" eines Launchers nähme sie wieder mit.
+    Deshalb wird sie hier aktiv entfernt, bei jedem Lauf.
+
+    Scheitert das Löschen der Seite, bricht der Lauf ab und läuft in die
+    Ersatzseiten-Klammer von baue_ausgeliefert. Das ist gewollt: eine Seite,
+    die weg soll und nicht weggeht, darf nicht stillschweigend liegenbleiben.
+    Der leere Ordner danach ist dagegen nur Ordnung und darf scheitern — unter
+    OneDrive verweigert Windows das Entfernen eines Ordners regelmäßig, obwohl
+    die Datei darin schon weg ist (am 17.08.2026 hier passiert, WinError 5).
+    Daran soll kein Bau hängen: öffentlich erreichbar ist die Adresse ohne
+    index.html ohnehin nicht, und ein leerer Ordner kommt in Git gar nicht an.
+    """
+    for stadt in STAEDTE:
+        if stadt in staedte:
+            continue
+        for ordner in (ziel / stadt.slug, ziel / UMLAUT_PFADE.get(stadt.slug, stadt.slug)):
+            seite = ordner / "index.html"
+            if seite.exists():
+                seite.unlink()
+                print(f"  {stadt.name}: zurückgehalten, entfernt -> {seite}")
+            if ordner.is_dir() and not any(ordner.iterdir()):
+                try:
+                    ordner.rmdir()
+                except OSError as fehler:
+                    print(f"  Hinweis: {ordner} liess sich nicht entfernen "
+                          f"({fehler}). Der Ordner ist leer, die Adresse "
+                          f"antwortet nicht. Kein Grund zum Abbruch.")
+
+
+def baue_startseite(ziel: Path, staedte: tuple[Stadt, ...] = STAEDTE) -> None:
     """Schreibt die Städte-Auswahl nach ziel/index.html."""
     vorlage = STARTSEITE_VORLAGE.read_text(encoding="utf-8")
     stil, recht = _stil_und_recht_aus_der_wartungsseite()
     ersetzungen = (
         ("__STIL__", stil),
-        ("__STAEDTE_KACHELN__", "\n".join(_kachel(s) for s in STAEDTE)),
+        ("__STAEDTE_KACHELN__", "\n".join(_kachel(s) for s in staedte)),
         ("__IMPRESSUM_BLOCK__", recht),
     )
     html = vorlage
@@ -800,10 +864,17 @@ def baue_startseite(ziel: Path) -> None:
     ziel.mkdir(parents=True, exist_ok=True)
     (ziel / "index.html").write_text(html, encoding="utf-8")
     print(f"  Startseite geschrieben: {ziel / 'index.html'} "
-          f"({len(STAEDTE)} Städte)")
+          f"({len(staedte)} Städte)")
 
 
-def baue_umlaut_weiterleitung(ziel: Path) -> None:
+# Getippte Umlaut-Adressen, die auf einen ASCII-Pfad weiterleiten. Als Tabelle,
+# weil entferne_zurueckgehaltene() dieselbe Zuordnung braucht: eine Weiterleitung
+# auf eine zurückgehaltene Stadt wäre ein Verweis ins Leere.
+UMLAUT_PFADE = {"koeln": "köln"}
+
+
+def baue_umlaut_weiterleitung(ziel: Path,
+                              staedte: tuple[Stadt, ...] = STAEDTE) -> None:
     """Legt /köln/ an, das auf /koeln/ weiterleitet.
 
     Die Pfade selbst bleiben ASCII (koeln, nicht köln), weil ein Umlaut im
@@ -811,8 +882,8 @@ def baue_umlaut_weiterleitung(ziel: Path) -> None:
     beim Verlinken zerbricht. Wer die Umlaut-Adresse tippt, landet trotzdem
     richtig.
     """
-    for stadt, umlaut in (("koeln", "köln"),):
-        if not any(s.slug == stadt for s in STAEDTE):
+    for stadt, umlaut in UMLAUT_PFADE.items():
+        if not any(s.slug == stadt for s in staedte):
             continue
         ordner = ziel / umlaut
         ordner.mkdir(parents=True, exist_ok=True)
@@ -861,12 +932,20 @@ def baue_stadt(stadt: Stadt, ziel: Path) -> int:
     return 0
 
 
-def baue_staedte(ziel: Path) -> int:
-    """Baut Startseite und alle Städte nach ziel. Exit-Code ist der schwerste."""
+def baue_staedte(ziel: Path, staedte: tuple[Stadt, ...] = STAEDTE) -> int:
+    """Baut Startseite und die übergebenen Städte nach ziel.
+
+    Der Vorgabewert ist die vollständige Struktur. So bauen der Blick von Hand
+    und die Tests des Gerüsts weiter alles; der ausgelieferte Weg übergibt
+    dagegen nur die veröffentlichten Städte (T-74).
+
+    Exit-Code ist der schwerste.
+    """
     print(f"Baue Städte-Struktur nach {ziel}")
-    codes = [baue_stadt(stadt, ziel) for stadt in STAEDTE]
-    baue_umlaut_weiterleitung(ziel)
-    baue_startseite(ziel)
+    codes = [baue_stadt(stadt, ziel) for stadt in staedte]
+    baue_umlaut_weiterleitung(ziel, staedte)
+    entferne_zurueckgehaltene(ziel, staedte)
+    baue_startseite(ziel, staedte)
     if (ROOT / "LIVE_FREIGEGEBEN").exists():
         print("  HINWEIS: Der alte Marker LIVE_FREIGEGEBEN liegt noch da. In "
               "dieser Struktur schaltet er nichts mehr frei — jede Stadt hat "
@@ -885,13 +964,29 @@ def baue_ausgeliefert(ziel: Path) -> int:
     diese Klammer beim Wechsel des Normalwegs (T-62) genau die Zusage aus A-11
     stillschweigend wegfallen. Deshalb hier: erst der Abbruch, dann die
     Ersatzseite an jeder Adresse, die eine Karte tragen könnte.
+
+    Dies ist zugleich der Weg, der über die Veröffentlichung entscheidet: er
+    baut ausschliesslich die Städte aus ausgelieferte_staedte() (T-74). Eine
+    zurückgehaltene Stadt bekommt hier keine Adresse, auch im Fehlerfall keine
+    Ersatzseite — die Adresse soll ja gerade nicht antworten.
     """
+    staedte = ausgelieferte_staedte()
     try:
-        return baue_staedte(ziel)
+        return baue_staedte(ziel, staedte)
     except Exception as fehler:  # noqa: BLE001 — jeder Grund führt zur Ersatzseite
         print(f"FEHLER beim Bau der Städte-Struktur: {fehler}")
+        # Auch hier weg mit den zurückgehaltenen Adressen. Der eigene
+        # Fehlerfang ist Absicht: diese Klammer hat eine Zusage zu halten
+        # (A-11, an jeder ausgelieferten Adresse steht eine Wartungsseite).
+        # Sie darf nicht daran scheitern, dass eine Datei sich nicht löschen
+        # liess — dann steht der Grund im Protokoll und die Zusage trotzdem.
+        try:
+            entferne_zurueckgehaltene(ziel, staedte)
+        except OSError as raeumfehler:
+            print(f"  WARNUNG: zurückgehaltene Adressen liessen sich nicht "
+                  f"räumen ({raeumfehler}). Von Hand nachsehen.")
         seiten = [ziel / "index.html"]
-        seiten += [ziel / s.slug / "index.html" for s in STAEDTE]
+        seiten += [ziel / s.slug / "index.html" for s in staedte]
         for seite in seiten:
             seite.parent.mkdir(parents=True, exist_ok=True)
             if not seite.exists() or seite.read_text(encoding="utf-8") != FALLBACK_WARTUNG_HTML:
