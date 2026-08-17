@@ -117,6 +117,22 @@ KATEGORIE_GRUPPEN = {
     'sperrmüll':     {'keywords':['sperrmüll','sperr','sofa','matratze','kühlschrank'],'label':'🛋 Sperrmüll','color':'#8a5c00','hinweis':'Oft Privatpersonen, die Sperrmülltermin umgehen'},
     'elektroschrott':{'keywords':['elektroschrott','elektro','e-schrott'],'label':'⚡ Elektroschrott','color':'#0066aa','hinweis':'Entsorgungspflichtige Geräte — Rückgabepflicht besteht'},
     'illegal':       {'keywords':['illegal','ablagerung','wild','schwarze säcke'],'label':'🚮 Illegale Ablagerung','color':'#cc0000','hinweis':'Allgemeine illegale Entsorgung'},
+    # Siebte Gruppe, Lars-Entscheidung 15.08.2026 (T-49). Anlass war Köln: dort
+    # sind Schrottfahrräder 413 von 2.242 müllnahen Meldungen (18 Prozent) und
+    # passten in keine der sechs Gruppen — "Schrott-KFZ" meint Fahrzeuge mit
+    # Kennzeichen und rät zur Kennzeichen-Kontrolle, "Sperrmüll" meint den
+    # umgangenen Abholtermin.
+    #
+    # Sie steht bewusst AM ENDE. kategorisiere() nimmt die erste Gruppe, deren
+    # Schlüsselwort im Text steht; jede frühere Stelle hätte bestehende
+    # Berliner Zuordnungen verschoben (etwa "Abfall - Sperrmüll und
+    # Schrottfahrrad", das heute Sperrmüll ist). So kommen ausschließlich
+    # Meldungen dazu, die bisher gar keine Gruppe hatten: im Berliner Bestand
+    # 1.754 Zeilen, die seit jeher unzugeordnet mitliefen.
+    #
+    # Der Plural trägt ein Ä und ist deshalb ein eigenes Schlüsselwort —
+    # "schrottfahrrad" trifft "Schrottfahrräder" nicht.
+    'schrottfahrrad':{'keywords':['schrottfahrrad','schrottfahrräder','fahrradleiche','fahrradskelett'],'label':'🚲 Schrottfahrräder','color':'#6b46c1','hinweis':'Dauerhaft abgestellte Räder — Entfernung setzt Kennzeichnung und Fristablauf voraus'},
 }
 
 def kategorisiere(text):
@@ -125,11 +141,29 @@ def kategorisiere(text):
         if any(kw in t for kw in grp['keywords']): return key
     return None
 
-def load_data():
+def load_data(stadt=None):
+    """Daten für die Karte. Mit ``stadt`` nur der Bestand DIESER Stadt.
+
+    T-49 / Auflage A-19: die Städte werden getrennt dargestellt, mit eigener
+    Karte, eigener Kennzahl und eigener Sperrliste. Ohne diesen Filter zeigte
+    die Berliner Seite ab dem ersten Kölner Import auch Kölner Zellen und einen
+    Datenstand aus Köln — genau der Fehler, den T-51 auf der Schreibseite und
+    T-39 beim Datenstand geschlossen haben, nur eine Schicht weiter oben.
+
+    Ohne Angabe bleibt es beim Gesamtbestand. Das ist das Verhalten von vorher
+    und für eine Datenbank mit genau einer Stadt dasselbe Ergebnis.
+    """
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
-    muell = conn.execute("SELECT datum,lat,lon,kategorie,betreff FROM meldungen WHERE is_muell=1 AND datum IS NOT NULL AND lat IS NOT NULL").fetchall()
+    stadt_und = " AND stadt = ?" if stadt else ""
+    stadt_wo = " WHERE stadt = ?" if stadt else ""
+    p = (stadt,) if stadt else ()
+
+    muell = conn.execute(
+        "SELECT datum,lat,lon,kategorie,betreff FROM meldungen "
+        "WHERE is_muell=1 AND datum IS NOT NULL AND lat IS NOT NULL" + stadt_und,
+        p).fetchall()
     cluster_m = {}
     for row in muell:
         cid = f"{round(row['lat']/GEO_RADIUS)*GEO_RADIUS:.5f}_{round(row['lon']/GEO_RADIUS)*GEO_RADIUS:.5f}"
@@ -140,8 +174,9 @@ def load_data():
     # übernommen (DSGVO Erwägungsgrund 26: Re-Identifikation über Bezirk+PLZ+Straße
     # ist bei einer einzigen Meldung trivial möglich).
     hotspots = [dict(r) for r in conn.execute(
-        "SELECT * FROM hotspots WHERE meldungen_count >= ? ORDER BY score DESC",
-        (K_ANONYMITY_THRESHOLD,)
+        "SELECT * FROM hotspots WHERE meldungen_count >= ?" + stadt_und +
+        " ORDER BY score DESC",
+        (K_ANONYMITY_THRESHOLD,) + p
     ).fetchall()]
 
     # A-7: Widerspruch nach Art. 21 — gesperrte Zellen fallen aus der
@@ -267,15 +302,21 @@ def load_data():
                SUM(CASE WHEN score_label='hoch' THEN 1 ELSE 0 END) as hoch
         FROM hotspots
         WHERE cluster_id NOT IN (SELECT cluster_id FROM sperrliste)
+    """ + stadt_und + """
         GROUP BY bezirk ORDER BY max_score DESC
-    """).fetchall()]
+    """, p).fetchall()]
 
     # H-02b: Aktualitäts-Stand = letzter ERFOLGREICHER Fetch, nicht das Render-Datum.
     # Ein Fehllauf (API-Ausfall) schreibt count_total=-1; nur Läufe mit echten
     # Daten (count_total > 0) zählen als erfolgreich. Fehlt jeder Erfolgs-Eintrag
     # (frische DB), bleibt last_update None und das Frontend zeigt keinen Stand.
+    # T-49: auch der Stand gilt je Stadt. Ohne den Filter stuende auf der
+    # Berliner Seite der Zeitpunkt des letzten KOELNER Abrufs, obwohl aus
+    # Berlin seit dem 22.04.2026 nichts mehr kommt (Befund 3 aus T-51, hier auf
+    # der Leseseite).
     letzter_erfolg = conn.execute(
-        "SELECT fetched_at FROM fetch_log WHERE count_total > 0 ORDER BY fetched_at DESC LIMIT 1"
+        "SELECT fetched_at FROM fetch_log WHERE count_total > 0" + stadt_und +
+        " ORDER BY fetched_at DESC LIMIT 1", p
     ).fetchone()
     last_update = letzter_erfolg["fetched_at"][:10] if letzter_erfolg else None
 
@@ -383,11 +424,18 @@ def stand_fuer_anzeige(iso: str | None) -> str:
         return iso
 
 
-def render_live():
-    """Rendert die Live-Karte aus der DB nach OUT_PATH (index.html)."""
+def render_live(ziel: Path | None = None, praefix: str = "", stadt=None):
+    """Rendert die Live-Karte aus der DB.
+
+    Ohne Argumente unverändert wie bisher: Ausgabe nach OUT_PATH, Verweise auf
+    assets/ bleiben stehen. Mit ziel und praefix rendert dieselbe Karte in ein
+    Stadt-Unterverzeichnis (T-49), wo assets/ eine Ebene höher liegt.
+    ``stadt`` grenzt den Bestand auf eine Stadt ein (A-19).
+    """
     pruefe_sri()
-    print(f"Lade Daten aus {DB_PATH}...")
-    data = load_data()
+    print(f"Lade Daten aus {DB_PATH}"
+          f"{' (nur ' + stadt + ')' if stadt else ''}...")
+    data = load_data(stadt)
     print(f"  {len(data['hotspots'])} Hotspots")
     compact = json.dumps(data, ensure_ascii=False, separators=(',',':'))
     # HTML-Sonderzeichen im JSON escapen, damit </script>-Tags den Block nicht brechen (C-04)
@@ -406,8 +454,12 @@ def render_live():
         )
     last_update_str = stand_fuer_anzeige(data['last_update'])
     html = tmpl.replace('__APP_DATA_PLACEHOLDER__', compact).replace('__LAST_UPDATE__', last_update_str)
-    OUT_PATH.write_text(html, encoding='utf-8')
-    print(f"  Gespeichert: {OUT_PATH} (Stand der Daten: {last_update_str})")
+    if praefix:
+        html = mit_asset_praefix(html, praefix)
+    ziel = ziel or OUT_PATH
+    ziel.parent.mkdir(parents=True, exist_ok=True)
+    ziel.write_text(html, encoding='utf-8')
+    print(f"  Gespeichert: {ziel} (Stand der Daten: {last_update_str})")
 
 def _schreibe_wenn_abweichend(inhalt: str) -> bool:
     """Schreibt inhalt nach OUT_PATH, wenn dort etwas anderes steht. True = geschrieben."""
@@ -448,6 +500,11 @@ def rechtstexte_freigegeben() -> bool:
     return RECHTSTEXT_MARKE not in TEMPLATE.read_text(encoding='utf-8')
 
 
+# T-62 (15.08.2026): Der alte Einzelseiten-Weg baut nur noch diese eine Stadt.
+# Er ist der Ausnahmeweg, siehe den Abschnitt zur Befehlszeile ganz unten.
+LEGACY_STADT = "berlin"
+
+
 def main() -> int:
     """Rückgabewert ist der Exit-Code.
 
@@ -482,10 +539,416 @@ def main() -> int:
         print("  Es bleibt bei der Wartungsseite. Exit-Code 3.")
         return 3 if code == 0 else code
 
-    print(f"Freigabe-Marker {GO_LIVE_MARKER.name} vorhanden, rendere Live-Seite.")
-    render_live()
+    print(f"Freigabe-Marker {GO_LIVE_MARKER.name} vorhanden, rendere Live-Seite "
+          f"für {LEGACY_STADT}.")
+    # T-62 (15.08.2026): Bis heute stand hier render_live() ohne Stadt, also
+    # load_data(None) über den Gesamtbestand. Seit Köln im Bestand liegt, baute
+    # dieser Aufruf eine Seite mit dem Titel Berlin, 4.688 statt 4.660 Zellen,
+    # Ehrenfeld in der Berliner Bezirksauswahl und dem Datum des jüngsten
+    # Kölner Abrufs statt des 22.04.2026. Dieser Weg ist jetzt der Ausnahmeweg
+    # und rendert nur noch eine einzige, ausdrücklich benannte Stadt.
+    render_live(stadt=LEGACY_STADT)
     return 0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Städte-Gerüst (T-49, vorbereitet am 14.08.2026 auf Lars-Entscheidung)
+#
+# Zielstruktur der ausgelieferten Seite:
+#     /            Städte-Auswahl (startseite.html)
+#     /berlin/     Karte Berlin, Archiv bis 22.04.2026
+#     /koeln/      Karte Köln, sobald die Daten übernommen sind
+#     /bonn/       später, sobald Bonn in STAEDTE steht
+#
+# Drei Dinge sind hier bewusst so gebaut:
+#
+# 1. JEDE STADT HAT IHREN EIGENEN FREIGABE-SCHALTER. Der alte Marker
+#    LIVE_FREIGEGEBEN schaltet in dieser Struktur GAR NICHTS mehr frei; jede
+#    Stadt braucht ihre eigene Datei (LIVE_FREIGEGEBEN_BERLIN,
+#    LIVE_FREIGEGEBEN_KOELN). So kann Köln live gehen, ohne dass Berlin
+#    mitgeht, und umgekehrt. Fehlt der Schalter, bleibt es bei der
+#    Wartungsseite — fail-closed wie bisher.
+#
+# 2. DIE RECHTSTEXTE HABEN WEITERHIN GENAU EINE QUELLE. Impressum,
+#    Datenschutz-Hinweis, Widerspruchsweg und der ganze Stil kommen aus
+#    maintenance.html und werden beim Bauen eingesetzt. Es gibt keine zweite
+#    Fassung, die auseinanderlaufen könnte. Stadt-spezifisch ist nur, was
+#    stadt-spezifisch sein MUSS: Titel, Quellenangabe, Haftungssatz,
+#    Datenlizenz.
+#
+# 3. JEDE ERSETZUNG IST FAIL-CLOSED. Findet ein Anker sich nicht mehr im
+#    Quelltext, bricht der Bau ab, statt die Seite stillschweigend mit dem
+#    alten Text zu schreiben. Das ist die Lehre aus T-39: eine stille
+#    Nicht-Ersetzung sieht genau aus wie ein geglückter Lauf.
+# ─────────────────────────────────────────────────────────────────────────────
+
+from dataclasses import dataclass
+
+ROOT = Path(__file__).parent
+STARTSEITE_VORLAGE = ROOT / "startseite.html"
+
+# Anker in maintenance.html. Ändert sich dort ein Satz, schlägt der Bau fehl
+# und nennt den Anker — gewollt, siehe Punkt 3 oben.
+ANKER_TITEL = "<title>Müll-Monitor · Wartung</title>"
+# T-67 (15.08.2026): Diese beiden Anker trugen bis heute die Behauptung, die
+# Erfassung laufe weiter, samt grünem Abzeichen "Datenerfassung aktiv". Sie sind
+# mit der Wartungsseite zusammen berichtigt worden.
+ANKER_QUELLE = ("<p>Die Berliner Quelle liefert seit dem 22.04.2026 keine neuen "
+                "Meldungen. Der bis dahin erfasste Bestand bleibt erhalten, er "
+                "wächst bis auf Weiteres nicht weiter. An der Anbindung weiterer "
+                "Städte wird gearbeitet.</p>")
+ANKER_STATUS = '<div class="status">Erfassung ruht seit dem 22.04.2026</div>'
+ANKER_HAFTUNG = ("<p>Die dargestellten Daten basieren auf der OpenData-API des Berliner "
+                 "Ordnungsamtes. Trotz sorgfältiger inhaltlicher Kontrolle wird keine "
+                 "Gewähr für Aktualität, Richtigkeit und Vollständigkeit übernommen.</p>")
+ANKER_LIZENZ = ('Daten: <a href="https://www.govdata.de/dl-de/by-2-0" '
+                'target="_blank">DL-DE-BY-2.0</a>')
+
+
+@dataclass(frozen=True)
+class Stadt:
+    """Eine Stadt der ausgelieferten Seite.
+
+    karte_moeglich sagt, ob überhaupt Daten für eine Karte vorliegen. Solange
+    das False ist, bleibt es bei der Wartungsseite, auch wenn jemand den
+    Freigabe-Schalter anlegt. Eine leere Karte zu veröffentlichen wäre
+    schlimmer als gar keine.
+    """
+    slug: str
+    name: str
+    quelle_satz: str
+    status_text: str
+    status_farbe: str
+    haftung_satz: str
+    lizenz_url: str
+    lizenz_text: str
+    kachel_status: str
+    kachel_marke: str
+    kachel_marke_klasse: str
+    karte_moeglich: bool
+
+    @property
+    def marker(self) -> Path:
+        return ROOT / f"LIVE_FREIGEGEBEN_{self.slug.upper()}"
+
+
+STAEDTE = (
+    Stadt(
+        slug="berlin",
+        name="Berlin",
+        quelle_satz=(
+            "<p>Grundlage sind die offen bereitgestellten Meldungen des Berliner "
+            "Ordnungsamts. Diese Quelle liefert seit dem 22.04.2026 keine neuen "
+            "Meldungen. Der erfasste Bestand bleibt erhalten, er wächst bis auf "
+            "Weiteres nicht weiter.</p>"),
+        status_text="Quelle seit dem 22.04.2026 ohne neue Meldungen",
+        status_farbe="ruht",
+        haftung_satz=(
+            "<p>Die dargestellten Daten basieren auf den offen bereitgestellten "
+            "Meldungen des Berliner Ordnungsamts. Trotz sorgfältiger inhaltlicher "
+            "Kontrolle wird keine Gewähr für Aktualität, Richtigkeit und "
+            "Vollständigkeit übernommen.</p>"),
+        lizenz_url="https://www.govdata.de/dl-de/by-2-0",
+        lizenz_text="DL-DE-BY-2.0",
+        kachel_status="Erfasster Bestand bis zum 22.04.2026. Die Quelle liefert seit dem 22.04.2026 keine neuen Meldungen.",
+        kachel_marke="Archiv",
+        kachel_marke_klasse="marke-archiv",
+        karte_moeglich=True,
+    ),
+    Stadt(
+        slug="koeln",
+        name="Köln",
+        quelle_satz=(
+            "<p>Die Kölner Ansicht wird gerade vorbereitet. Grundlage sind die offen "
+            "bereitgestellten Anliegen-Meldungen der Stadt Köln.</p>"),
+        status_text="In Vorbereitung",
+        status_farbe="neutral",
+        haftung_satz=(
+            "<p>Die dargestellten Daten basieren auf den offen bereitgestellten "
+            "Anliegen-Meldungen der Stadt Köln. Trotz sorgfältiger inhaltlicher "
+            "Kontrolle wird keine Gewähr für Aktualität, Richtigkeit und "
+            "Vollständigkeit übernommen.</p>"),
+        lizenz_url="https://www.govdata.de/dl-de/zero-2-0",
+        lizenz_text="DL-DE-ZERO-2.0",
+        kachel_status="Die Übernahme der Kölner Meldungen wird vorbereitet.",
+        kachel_marke="In Vorbereitung",
+        kachel_marke_klasse="marke-vorbereitung",
+        karte_moeglich=False,
+    ),
+)
+
+# Der grüne Punkt der Vorlage pulsiert und sagt damit "läuft gerade". Für eine
+# Quelle, die nichts mehr liefert, und für eine Stadt, die erst vorbereitet
+# wird, ist das dieselbe Sorte Zusicherung, die T-39 und T-45 aus der Seite
+# entfernt haben. Deshalb bekommt jede Statusfarbe auch den Punkt — Farbe UND
+# Animation. Eine Anweisung im style-Attribut allein reicht nicht, weil der
+# Punkt ein ::before-Element ist und sich so nicht erreichen lässt.
+STATUS_STIL = {
+    "ruht": """.status {
+  background: rgba(214,40,40,.15);
+  border-color: rgba(214,40,40,.35);
+  color: #f8b4b4;
+}
+.status::before { background: #d62828; animation: none; }""",
+    "neutral": """.status {
+  background: rgba(255,255,255,.08);
+  border-color: rgba(255,255,255,.18);
+  color: #cbd5e0;
+}
+.status::before { background: #a0aec0; animation: none; }""",
+}
+
+
+def _ersetze_einmal(text: str, anker: str, ersatz: str, wofuer: str) -> str:
+    """Ersetzt anker durch ersatz und bricht ab, wenn der Anker fehlt.
+
+    Ohne diesen Abbruch entstünde eine Seite, die für die eine Stadt den Text
+    der anderen trägt — und niemand würde es merken, weil das Bauen gelingt.
+    """
+    if anker not in text:
+        raise RuntimeError(
+            f"{MAINTENANCE_PATH.name}: Anker für {wofuer} nicht gefunden.\n"
+            f"  Gesucht: {anker[:80]}...\n"
+            f"  Wurde die Wartungsseite umformuliert? Dann den Anker in "
+            f"export_html.py nachziehen, sonst bekäme eine Stadtseite den "
+            f"Text einer anderen Stadt."
+        )
+    return text.replace(anker, ersatz, 1)
+
+
+def mit_asset_praefix(html: str, praefix: str) -> str:
+    """Setzt praefix vor jeden Verweis auf assets/.
+
+    Eine Stadtseite liegt eine Ebene tiefer als assets/. Ohne diese Umschrift
+    zeigen Schriften, Symbole und die Kartenbibliothek ins Leere — und zwar
+    stumm: die Seite lädt, sie sieht nur falsch aus und die Karte bleibt leer.
+    """
+    return html.replace('="assets/', f'="{praefix}assets/')
+
+
+def wartungsseite_fuer(stadt: Stadt, praefix: str = "../") -> str:
+    """Baut die Wartungsseite einer Stadt aus der einen Quelle maintenance.html."""
+    html = MAINTENANCE_PATH.read_text(encoding="utf-8")
+    html = _ersetze_einmal(
+        html, ANKER_TITEL,
+        f"<title>Müll-Monitor {stadt.name} · Wartung</title>", "den Seitentitel")
+    html = _ersetze_einmal(html, ANKER_QUELLE, stadt.quelle_satz, "die Quellenangabe")
+    html = _ersetze_einmal(
+        html, ANKER_STATUS,
+        f'<div class="status">{stadt.status_text}</div>',
+        "die Statuszeile")
+    html = _ersetze_einmal(
+        html, "</head>",
+        f"<style>\n{STATUS_STIL[stadt.status_farbe]}\n</style>\n</head>",
+        "das Ende des Kopfbereichs")
+    html = _ersetze_einmal(html, ANKER_HAFTUNG, stadt.haftung_satz, "den Haftungssatz")
+    html = _ersetze_einmal(
+        html, ANKER_LIZENZ,
+        f'Daten: <a href="{stadt.lizenz_url}" target="_blank">{stadt.lizenz_text}</a>',
+        "die Datenlizenz")
+    return mit_asset_praefix(html, praefix) if praefix else html
+
+
+def _stil_und_recht_aus_der_wartungsseite() -> tuple[str, str]:
+    """Holt Stilblock und Impressum-Ebene aus maintenance.html."""
+    html = MAINTENANCE_PATH.read_text(encoding="utf-8")
+    for anfang, ende, wofuer in (("<style>", "</style>", "den Stilblock"),
+                                 ('<div id="impOverlay"', "</body>", "die Impressum-Ebene")):
+        if anfang not in html or ende not in html:
+            raise RuntimeError(
+                f"{MAINTENANCE_PATH.name}: {wofuer} nicht gefunden. Die Startseite "
+                f"bezieht beides von dort und würde sonst ohne Pflichtangaben "
+                f"gebaut.")
+    stil = html[html.index("<style>"):html.index("</style>") + len("</style>")]
+    recht = html[html.index('<div id="impOverlay"'):html.index("</body>")].rstrip()
+    return stil, recht
+
+
+def _kachel(stadt: Stadt) -> str:
+    return (f'    <a class="stadt" href="{stadt.slug}/">\n'
+            f'      <div class="stadt-name">{stadt.name}</div>\n'
+            f'      <div class="stadt-status">{stadt.kachel_status}</div>\n'
+            f'      <span class="stadt-marke {stadt.kachel_marke_klasse}">'
+            f'{stadt.kachel_marke}</span>\n'
+            f'    </a>')
+
+
+def baue_startseite(ziel: Path) -> None:
+    """Schreibt die Städte-Auswahl nach ziel/index.html."""
+    vorlage = STARTSEITE_VORLAGE.read_text(encoding="utf-8")
+    stil, recht = _stil_und_recht_aus_der_wartungsseite()
+    ersetzungen = (
+        ("__STIL__", stil),
+        ("__STAEDTE_KACHELN__", "\n".join(_kachel(s) for s in STAEDTE)),
+        ("__IMPRESSUM_BLOCK__", recht),
+    )
+    html = vorlage
+    for platzhalter, ersatz in ersetzungen:
+        # Genau einmal, nicht mindestens einmal. Am 14.08.2026 stand __STIL__
+        # zusätzlich in einem CSS-Kommentar der Vorlage; die zweite Ersetzung
+        # schob den kompletten Stilblock samt </style> mitten in ein
+        # Stil-Element und zerlegte die Seite. Aufgefallen ist das erst im
+        # Browser, weil das Bauen selbst fehlerfrei durchlief.
+        anzahl = html.count(platzhalter)
+        if anzahl != 1:
+            raise RuntimeError(
+                f"{STARTSEITE_VORLAGE.name}: Platzhalter {platzhalter} kommt "
+                f"{anzahl}-mal vor, erwartet ist genau einmal. Bei 0 ginge eine "
+                f"Startseite ohne Stil oder ohne Pflichtangaben online, bei "
+                f"mehr als 1 wird an einer Stelle eingesetzt, die kein "
+                f"Platzhalter sein sollte.")
+        html = html.replace(platzhalter, ersatz, 1)
+    ziel.mkdir(parents=True, exist_ok=True)
+    (ziel / "index.html").write_text(html, encoding="utf-8")
+    print(f"  Startseite geschrieben: {ziel / 'index.html'} "
+          f"({len(STAEDTE)} Städte)")
+
+
+def baue_umlaut_weiterleitung(ziel: Path) -> None:
+    """Legt /köln/ an, das auf /koeln/ weiterleitet.
+
+    Die Pfade selbst bleiben ASCII (koeln, nicht köln), weil ein Umlaut im
+    Pfad als %C3%B6 kodiert wird und in Mail-Programmen und Chat-Fenstern
+    beim Verlinken zerbricht. Wer die Umlaut-Adresse tippt, landet trotzdem
+    richtig.
+    """
+    for stadt, umlaut in (("koeln", "köln"),):
+        if not any(s.slug == stadt for s in STAEDTE):
+            continue
+        ordner = ziel / umlaut
+        ordner.mkdir(parents=True, exist_ok=True)
+        (ordner / "index.html").write_text(
+            '<!DOCTYPE html>\n<html lang="de">\n<head>\n<meta charset="UTF-8">\n'
+            f'<meta http-equiv="refresh" content="0; url=../{stadt}/">\n'
+            f'<link rel="canonical" href="../{stadt}/">\n'
+            '<meta name="robots" content="noindex">\n'
+            '<title>Müll-Monitor · Weiterleitung</title>\n</head>\n<body>\n'
+            f'<p>Weiter zu <a href="../{stadt}/">/{stadt}/</a>.</p>\n'
+            '</body>\n</html>\n', encoding="utf-8")
+        print(f"  Weiterleitung geschrieben: {ordner / 'index.html'} -> /{stadt}/")
+
+
+def baue_stadt(stadt: Stadt, ziel: Path) -> int:
+    """Baut eine Stadt nach ziel/<slug>/index.html.
+
+    Rückgabewert ist der Exit-Code dieser Stadt:
+      0 = Wartungsseite steht oder Live-Karte gerendert
+      3 = Freigabe-Schalter liegt vor, Rechtstexte sind aber nicht freigegeben
+      4 = Freigabe-Schalter liegt vor, es gibt für diese Stadt noch keine Daten
+    """
+    ausgabe = ziel / stadt.slug / "index.html"
+    ausgabe.parent.mkdir(parents=True, exist_ok=True)
+
+    def wartung(grund: str) -> None:
+        ausgabe.write_text(wartungsseite_fuer(stadt), encoding="utf-8")
+        print(f"  {stadt.name}: Wartungsseite ({grund}) -> {ausgabe}")
+
+    if not stadt.marker.exists():
+        wartung(f"kein {stadt.marker.name}")
+        return 0
+    if not stadt.karte_moeglich:
+        wartung("Freigabe liegt vor, aber es gibt noch keine Daten")
+        print(f"  {stadt.name}: {stadt.marker.name} existiert, für diese Stadt "
+              f"sind aber noch keine Meldungen übernommen. Exit-Code 4.")
+        return 4
+    if not rechtstexte_freigegeben():
+        wartung("Rechtstexte nicht freigegeben")
+        print(f"  {stadt.name}: {TEMPLATE.name} enthält noch die Marke "
+              f"{RECHTSTEXT_MARKE}. Exit-Code 3.")
+        return 3
+    print(f"  {stadt.name}: {stadt.marker.name} vorhanden, rendere Live-Karte.")
+    # A-19: jede Stadtseite bekommt ausschliesslich ihren eigenen Bestand.
+    render_live(ziel=ausgabe, praefix="../", stadt=stadt.slug)
+    return 0
+
+
+def baue_staedte(ziel: Path) -> int:
+    """Baut Startseite und alle Städte nach ziel. Exit-Code ist der schwerste."""
+    print(f"Baue Städte-Struktur nach {ziel}")
+    codes = [baue_stadt(stadt, ziel) for stadt in STAEDTE]
+    baue_umlaut_weiterleitung(ziel)
+    baue_startseite(ziel)
+    if (ROOT / "LIVE_FREIGEGEBEN").exists():
+        print("  HINWEIS: Der alte Marker LIVE_FREIGEGEBEN liegt noch da. In "
+              "dieser Struktur schaltet er nichts mehr frei — jede Stadt hat "
+              "ihren eigenen Schalter.")
+    return max(codes, default=0)
+
+
+def baue_ausgeliefert(ziel: Path) -> int:
+    """Baut die Städte-Struktur und fängt einen Abbruch mit der Ersatzseite ab.
+
+    A-11 hing bisher am Einzelseiten-Weg: fehlt maintenance.html, schreibt
+    _wartungsseite_schreiben die eingebaute Ersatzseite, damit keine alte
+    Live-Seite mit Ortsdaten öffentlich stehenbleibt. Der Städte-Weg hat diese
+    Vorkehrung nicht — er bricht ab, sobald ein Anker oder die Wartungsquelle
+    fehlt, und das ist als Schutz vor falschem Text auch richtig. Nur würde ohne
+    diese Klammer beim Wechsel des Normalwegs (T-62) genau die Zusage aus A-11
+    stillschweigend wegfallen. Deshalb hier: erst der Abbruch, dann die
+    Ersatzseite an jeder Adresse, die eine Karte tragen könnte.
+    """
+    try:
+        return baue_staedte(ziel)
+    except Exception as fehler:  # noqa: BLE001 — jeder Grund führt zur Ersatzseite
+        print(f"FEHLER beim Bau der Städte-Struktur: {fehler}")
+        seiten = [ziel / "index.html"]
+        seiten += [ziel / s.slug / "index.html" for s in STAEDTE]
+        for seite in seiten:
+            seite.parent.mkdir(parents=True, exist_ok=True)
+            if not seite.exists() or seite.read_text(encoding="utf-8") != FALLBACK_WARTUNG_HTML:
+                seite.write_text(FALLBACK_WARTUNG_HTML, encoding="utf-8")
+                print(f"  Ersatz-Wartungsseite geschrieben: {seite}")
+            else:
+                print(f"  {seite} ist bereits die Ersatz-Wartungsseite.")
+        print("  Ursache beheben, dann erneut ausführen. Exit-Code 2.")
+        return 2
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Befehlszeile (T-62, 15.08.2026)
+#
+# Bis heute war es andersherum: der stadtblinde Einzelseiten-Weg war der
+# Normalfall, die Städte-Struktur steckte hinter --staedte. Alle drei Launcher
+# riefen deshalb "python export_html.py" auf und bauten damit eine Seite, die
+# "Müll-Hotspot Monitor Berlin" heißt, aber Kölner Zellen mitzählt: 4.688 statt
+# 4.660 Standorte, 75.297 statt 74.397 Meldungen, "Ehrenfeld" in der Berliner
+# Bezirksauswahl und im Datenstand-Streifen der 15.08.2026 mit grünem Punkt
+# statt des 22.04.2026 in Warnfarbe. Das war wörtlich Befund H-04, den T-39 am
+# 13.08.2026 geschlossen hatte, nur über einen anderen Weg zurückgekommen.
+#
+# Warum der Normalweg wechselt und nicht bloß die Launcher den Zusatz bekommen:
+# ein vergessener Zusatz baut sonst weiterhin still eine inhaltlich falsche
+# Seite. Jetzt baut ein vergessener Zusatz die richtige Struktur, und wer den
+# alten Weg will, muss ihn benennen. Der Fehler, der übrigbleibt, ist der
+# laute.
+#
+#   python export_html.py                     Städte-Struktur in die Wurzel
+#   python export_html.py --ziel _vorschau    dieselbe Struktur zur Ansicht
+#   python export_html.py --eine-seite        alter Weg, NUR Berlin
+#
+# --staedte und --jetzt-umstellen werden weiter angenommen und tun nichts. Sie
+# stehen in Merkzetteln, im detail von T-49 und in der Projekt-CLAUDE.md; ein
+# Abbruch mit "unbekanntes Argument" wäre dort die unnötigere Überraschung.
+# ─────────────────────────────────────────────────────────────────────────────
+
+ALTLASTEN_SCHALTER = ("--staedte", "--jetzt-umstellen")
+
+
+def cli(argv: list[str]) -> int:
+    """Wertet die Befehlszeile aus und liefert den Exit-Code."""
+    if "--eine-seite" in argv:
+        print("Einzelseiten-Weg (--eine-seite): es entsteht nur "
+              f"{OUT_PATH.name} für {LEGACY_STADT}, keine Städte-Struktur.")
+        return main()
+    ziel = ROOT
+    if "--ziel" in argv:
+        ziel = Path(argv[argv.index("--ziel") + 1])
+    for schalter in ALTLASTEN_SCHALTER:
+        if schalter in argv:
+            print(f"Hinweis: {schalter} wird nicht mehr gebraucht, die "
+                  f"Städte-Struktur ist seit T-62 der Normalfall.")
+    return baue_ausgeliefert(ziel)
+
 
 if __name__ == "__main__":
     import sys
-    sys.exit(main())
+    sys.exit(cli(sys.argv[1:]))

@@ -23,20 +23,50 @@ jobs:
 
       - run: pip install requests
 
-      - name: Tracker ausführen
-        run: python tracker.py
+      # T-62 (15.08.2026): ein Lauf je Stadt, jede ausdrücklich genannt. Vorher
+      # stand hier nur "python tracker.py", das läuft Berlin — und Berlin
+      # liefert seit dem 22.04.2026 nichts. Köln wurde von keinem der drei
+      # Automatik-Wege je abgerufen. tests/test_launcher.py wird rot, wenn eine
+      # Stadt aus quellen.ALLE hier fehlt.
+      # T-64 (15.08.2026): Sicherung vor der Erfassung, fail-closed. Der
+      # tägliche Lauf löscht — tracker.run ruft am Ende retention.anwenden auf,
+      # und die läuft über jede Stadt. Schlägt die Sicherung fehl, wird nicht
+      # erfasst; Export und Push laufen trotzdem (A-11).
+      # --wenn-vorhanden: hier ist das der Normalfall. Der Runner checkt frisch
+      # aus, und ordnungsamt.db ist seit der Bereinigung im Mai 2026 nicht im
+      # Repository. Es gibt also nichts zu sichern, und das ist kein Fehler.
+      - name: Datenbank sichern
+        id: sicherung
+        run: python sicherung.py --wenn-vorhanden
         continue-on-error: true
 
+      - name: Tracker Berlin
+        if: steps.sicherung.outcome == 'success'
+        run: python tracker.py --stadt berlin
+        continue-on-error: true
+
+      - name: Tracker Köln
+        if: steps.sicherung.outcome == 'success'
+        run: python tracker.py --stadt koeln
+        continue-on-error: true
+
+      # T-62: Ohne Zusatz baut export_html.py seit dem 15.08.2026 die
+      # Städte-Struktur. Der alte, stadtblinde Weg braucht --eine-seite und
+      # rendert auch dann nur Berlin.
       - name: HTML exportieren
         run: python export_html.py
         continue-on-error: true
 
-      - name: index.html committen
+      - name: Ausgelieferte Seiten committen
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Actions Bot"
           # ordnungsamt.db bewusst NICHT committen (DSGVO: PII-DB bleibt lokal,
           # konsistent mit pi_setup.sh / run_tracker.bat / Pi-Cronjob).
-          git add index.html
+          # '*/index.html' nimmt berlin/, koeln/ und die Umlaut-Weiterleitung
+          # mit. Ohne das zeigt die Startseite auf Adressen, die 404 liefern.
+          # Die Anführungszeichen sind nötig, damit die Shell das Muster nicht
+          # selbst auflöst — auswerten soll es Git.
+          git add index.html '*/index.html'
           git diff --staged --quiet || git commit -m "Auto-Update: $(date '+%Y-%m-%d')"
           git push

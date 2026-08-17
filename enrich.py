@@ -19,6 +19,8 @@ import time
 from pathlib import Path
 from datetime import datetime
 
+import tracker
+
 DB_PATH = Path(__file__).parent / "ordnungsamt.db"
 API_BASE = "https://ordnungsamt.berlin.de/frontend.webservice.opendata/api/meldungen"
 
@@ -88,9 +90,12 @@ def run():
     conn.row_factory = sqlite3.Row
     init_db(conn)
 
+    # T-49: nur Berliner Meldungen. Der Detail-Endpunkt hier gehoert dem
+    # Berliner Ordnungsamt; eine Koelner oder Bonner Kennung wuerde dort ins
+    # Leere laufen oder — schlimmer — eine fremde Meldung treffen.
     todo = conn.execute("""
         SELECT id FROM meldungen
-        WHERE (lat IS NULL OR enriched = 0)
+        WHERE (lat IS NULL OR enriched = 0) AND stadt = 'berlin'
         ORDER BY id ASC
     """).fetchall()
 
@@ -110,7 +115,8 @@ def run():
 
     for i, row in enumerate(todo):
         mid = row["id"]
-        detail = fetch_detail(session, mid)
+        # T-49: die Quelle kennt nur ihre eigene Nummer, nicht das Stadt-Praefix.
+        detail = fetch_detail(session, tracker.roh_id(mid))
 
         if detail is None:
             errors += 1

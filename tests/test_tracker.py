@@ -133,7 +133,9 @@ def test_tracker_speichert_nur_muell(monkeypatch):
     count_muell = 0
 
     for m in meldungen:
-        mid = tracker.make_id(m)
+        # T-49 (15.08.2026): make_id traegt die Stadt und hat dafuer bewusst
+        # keinen Vorgabewert.
+        mid = tracker.make_id(m, tracker.STADT)
         lat, lon = tracker.extract_coords(m)
         muell = tracker.is_muell(m)
         datum = m.get("erstellungsDatum", now[:10])
@@ -161,7 +163,7 @@ def test_tracker_speichert_nur_muell(monkeypatch):
 
     rows = conn.execute("SELECT id, kategorie, betreff FROM meldungen").fetchall()
     assert len(rows) == 1, f"Erwartet 1 Mueell-Zeile, bekommen {len(rows)}: {[dict(r) for r in rows]}"
-    assert rows[0]["id"] == "1"
+    assert rows[0]["id"] == "berlin:1"
     assert count_muell == 1
 
 

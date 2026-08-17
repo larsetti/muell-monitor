@@ -18,11 +18,40 @@ from datetime import datetime
 from pathlib import Path
 
 import betreff_filter
+import open311
+import quellen
 import retention
 import sperrliste
 
 # ── Konfiguration ─────────────────────────────────────────────────────────────
 DB_PATH = Path(__file__).parent / "ordnungsamt.db"
+
+# ── Mehrstadt-Faehigkeit (Schema-Vorstufe zu T-49, 15.08.2026) ───────────────
+# Der Bestand kannte bisher bezirk, aber keine Stadt. Sobald eine zweite Stadt
+# in dieselbe Datenbank schreibt, rechnen alle Routinen, die "der gesamte
+# Bestand" meinen, ueber Staedtegrenzen hinweg — die Loeschroutine, der
+# Quellabgleich und der Datenstand-Streifen aus T-39 gleichermassen. Deshalb
+# traegt jede Zeile ihre Stadt, bevor die erste fremde Meldung importiert wird.
+#
+# STADT ist seit T-49 (Adapter-Stufe, 15.08.2026) nur noch die VORGABE fuer
+# einen Aufruf ohne Angabe. Welche Stadt ein Lauf bedient, entscheidet der
+# Parameter von run() beziehungsweise --stadt auf der Befehlszeile; die
+# Eigenheiten je Stadt stehen in quellen.py.
+#
+#     python tracker.py                 Berlin, unveraendert
+#     python tracker.py --stadt koeln   Koeln ueber Open311
+#
+# Es bleibt bei EINEM Tracker: der Ablauf steht hier, der Unterschied zwischen
+# den Staedten in quellen.py. Niemand muss mehr eine Konstante von Hand
+# aendern, um eine zweite Quelle abzurufen.
+STADT = "berlin"
+
+# Trennzeichen zwischen Stadt und der Kennung der Quelle. Berlin vergibt
+# numerische Kennungen (1066349), Koelns Open311 vergibt service_request_id,
+# ebenfalls numerisch. Ohne Praefix ueberschreibt eine Kollision still eine
+# fremde Meldung, weil der Insert bei doppelter Kennung ueberschreibt statt zu
+# scheitern. Der Doppelpunkt kommt in keiner der bekannten Quellkennungen vor.
+STADT_TRENNER = ":"
 
 # Müll-Kategorien — nur explizite Abfall-Einträge, kein catch-all
 MUELL_KEYWORDS = [
@@ -108,7 +137,8 @@ def init_db(conn: sqlite3.Connection):
             status      TEXT,
             is_muell    INTEGER DEFAULT 0,
             strasse     TEXT DEFAULT '',
-            plz         TEXT DEFAULT ''
+            plz         TEXT DEFAULT '',
+            stadt       TEXT NOT NULL DEFAULT 'berlin'
         );
         CREATE INDEX IF NOT EXISTS idx_latlon  ON meldungen(lat, lon);
         CREATE INDEX IF NOT EXISTS idx_datum   ON meldungen(datum);
@@ -127,7 +157,8 @@ def init_db(conn: sqlite3.Connection):
             score            REAL DEFAULT 0.0,
             score_label      TEXT DEFAULT 'niedrig',
             strasse          TEXT DEFAULT '',
-            plz              TEXT DEFAULT ''
+            plz              TEXT DEFAULT '',
+            stadt            TEXT NOT NULL DEFAULT 'berlin'
         );
 
         CREATE TABLE IF NOT EXISTS fetch_log (
@@ -135,25 +166,52 @@ def init_db(conn: sqlite3.Connection):
             fetched_at  TEXT,
             count_total INTEGER,
             count_new   INTEGER,
-            count_muell INTEGER
+            count_muell INTEGER,
+            stadt       TEXT NOT NULL DEFAULT 'berlin'
         );
     """)
     conn.commit()
 
-    # Spalten nachrüsten falls DB bereits existiert
-    for col, typedef in [("strasse", "TEXT DEFAULT ''"), ("plz", "TEXT DEFAULT ''")]:
+    # Spalten nachrüsten falls DB bereits existiert.
+    # T-49: stadt kommt mit DEFAULT 'berlin' dazu. Der Vorgabewert ist Absicht —
+    # jede Zeile, die vor der Umstellung geschrieben wurde, ist eine Berliner
+    # Zeile, und vorhandener Code, der die Spalte nicht kennt, schreibt weiter
+    # korrekte Daten statt an einer NOT-NULL-Bedingung zu scheitern.
+    stadt_spalte = "TEXT NOT NULL DEFAULT 'berlin'"
+    for col, typedef in [("strasse", "TEXT DEFAULT ''"), ("plz", "TEXT DEFAULT ''"),
+                         ("stadt", stadt_spalte)]:
         try:
             conn.execute(f"ALTER TABLE meldungen ADD COLUMN {col} {typedef}")
             conn.commit()
         except sqlite3.OperationalError:
             pass
 
-    for col, typedef in [("strasse", "TEXT DEFAULT ''"), ("plz", "TEXT DEFAULT ''")]:
+    for col, typedef in [("strasse", "TEXT DEFAULT ''"), ("plz", "TEXT DEFAULT ''"),
+                         ("stadt", stadt_spalte)]:
         try:
             conn.execute(f"ALTER TABLE hotspots ADD COLUMN {col} {typedef}")
             conn.commit()
         except sqlite3.OperationalError:
             pass
+
+    # T-49 / Befund 3: ohne Stadt im fetch_log liest der Datenstand-Streifen aus
+    # T-39 den letzten erfolgreichen Abruf IRGENDEINER Stadt. Sobald Koeln
+    # abruft, stuende auf der Berliner Seite ein frisches Datum, obwohl von dort
+    # seit dem 22.04.2026 nichts mehr kommt — genau der Fehlertyp, den T-39
+    # geschlossen hat.
+    try:
+        conn.execute(f"ALTER TABLE fetch_log ADD COLUMN stadt {stadt_spalte}")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+    conn.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_stadt_datum  ON meldungen(stadt, datum);
+        CREATE INDEX IF NOT EXISTS idx_stadt_bezirk ON meldungen(stadt, bezirk);
+        CREATE INDEX IF NOT EXISTS idx_hotspot_stadt ON hotspots(stadt);
+        CREATE INDEX IF NOT EXISTS idx_fetchlog_stadt ON fetch_log(stadt, id);
+    """)
+    conn.commit()
 
     # raw_json Spalte entfernen falls vorhanden (spart Speicherplatz)
     try:
@@ -170,7 +228,15 @@ def init_db(conn: sqlite3.Connection):
     retention.init_schema(conn)
     sperrliste.ensure_table(conn)
 
-    log.info("Datenbank initialisiert: %s", DB_PATH)
+    # Den Pfad aus der Verbindung nehmen, nicht aus dem Modul: rueckimport.py
+    # und die Tests arbeiten auf einer anderen Datenbank, und ein Protokoll,
+    # das dann den Betriebspfad nennt, fuehrt beim Nachlesen in die Irre.
+    try:
+        pfad = next((r[2] for r in conn.execute("PRAGMA database_list")
+                     if r[1] == "main"), None) or DB_PATH
+    except sqlite3.Error:
+        pfad = DB_PATH
+    log.info("Datenbank initialisiert: %s", pfad)
 
 
 # ── API-Abruf ─────────────────────────────────────────────────────────────────
@@ -286,12 +352,38 @@ def extract_coords(m: dict) -> tuple[float | None, float | None]:
         return None, None
 
 
-def make_id(m: dict) -> str:
+def make_id(m: dict, stadt: str) -> str:
+    """Kennung einer Meldung, immer mit der Stadt davor.
+
+    T-49 / Befund 4: meldungen.id war TEXT PRIMARY KEY ohne Stadtanteil. Berlin
+    und Koeln vergeben beide rein numerische Kennungen; eine Kollision haette
+    still eine fremde Meldung ueberschrieben, weil der Insert bei doppelter
+    Kennung aktualisiert statt zu scheitern. Der Parameter hat bewusst KEINEN
+    Vorgabewert — eine Stadt, die vergessen wird, soll auffallen und nicht
+    stillschweigend als Berlin gelten.
+    """
+    if not stadt:
+        raise ValueError("make_id braucht eine Stadt — ein Vorgabewert waere "
+                         "genau die stille Verwechslung, die T-49 verhindert.")
     raw_id = m.get("id") or m.get("meldungsId") or m.get("meldung_id")
-    if raw_id:
-        return str(raw_id)
-    digest = hashlib.md5(json.dumps(m, sort_keys=True).encode()).hexdigest()
-    return f"hash_{digest[:16]}"
+    if not raw_id:
+        digest = hashlib.md5(json.dumps(m, sort_keys=True).encode()).hexdigest()
+        raw_id = f"hash_{digest[:16]}"
+    return f"{stadt}{STADT_TRENNER}{raw_id}"
+
+
+def stadt_aus_id(meldung_id: str) -> str:
+    """Stadt aus einer praefixierten Kennung. Ohne Praefix gilt Berlin, weil
+    jede Zeile ohne Praefix aus der Zeit vor der Umstellung stammt."""
+    stadt, trenner, _ = (meldung_id or "").partition(STADT_TRENNER)
+    return stadt if trenner else "berlin"
+
+
+def roh_id(meldung_id: str) -> str:
+    """Kennung ohne Stadt-Praefix — fuer Abfragen gegen die Quelle, die ihre
+    eigene Nummer erwartet (enrich.py, fix_datum.py)."""
+    _, trenner, rest = (meldung_id or "").partition(STADT_TRENNER)
+    return rest if trenner else meldung_id
 
 
 def cluster_id(lat: float, lon: float) -> str:
@@ -336,6 +428,14 @@ def _fristen_anwenden(conn) -> dict:
     """A-4: Löschfristen anwenden und das Ergebnis protokollieren.
 
     Bewusst unabhängig vom Ausgang des Abrufs — siehe Aufrufstellen.
+
+    T-49: läuft bewusst über ALLE Städte, nicht nur über die dieses Laufs. Die
+    Routine rechnet dabei nicht stadtblind, sondern nacheinander je Stadt
+    (retention.anwenden ohne Stadt-Angabe). Der Grund ist derselbe wie bei
+    Finding H-01: die Speicherbegrenzung nach Art. 5 Abs. 1 lit. e darf nicht
+    daran hängen, dass die Schnittstelle EINER Stadt gerade erreichbar ist.
+    Berlin liefert seit dem 22.04.2026 nichts mehr; seine Fristen müssen
+    trotzdem weiterlaufen, wenn Köln abruft.
     """
     fristen = retention.anwenden(conn, datetime.utcnow())
     log.info("Löschroutine: %d Meldungen wegen Quellabgang (Frist %d Tage) gelöscht, "
@@ -345,133 +445,22 @@ def _fristen_anwenden(conn) -> dict:
     return fristen
 
 
-def run():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    init_db(conn)
+def berechne_hotspots(conn, quelle) -> dict:
+    """Zellen einer Stadt aus ihrem Meldungsbestand neu berechnen.
 
-    now = datetime.utcnow().isoformat()
-    meldungen = fetch_meldungen()
-    log.info("%d Meldungen von API erhalten", len(meldungen))
-
-    # H-02b: Leerer Abruf darf NICHT still als Erfolg durchgehen. Sonst läuft
-    # die Pipeline über alte Daten weiter und das Frontend behauptet weiter
-    # "tagesaktuell". Fehler-Marker in fetch_log (count_total=-1) schreiben und
-    # mit Exit-Code != 0 abbrechen, damit der Launcher den Push überspringt.
-    if not meldungen:
-        log.error("Abruf lieferte 0 Meldungen — API-Ausfall oder leerer Feed. "
-                  "Pipeline wird abgebrochen, kein Hotspot-Neuaufbau, kein Push.")
-        conn.execute("""
-            INSERT INTO fetch_log (fetched_at, count_total, count_new, count_muell)
-            VALUES (?,?,?,?)
-        """, (now, -1, 0, 0))
-        conn.commit()
-        # A-4 / Finding H-01 (29.07.2026): Die Fristen laufen AUCH hier.
-        # Die Speicherbegrenzung nach Art. 5 Abs. 1 lit. e darf nicht daran
-        # hängen, dass die Schnittstelle der Behörde erreichbar ist — sonst
-        # steht die Löschung genau dann still, wenn der Bestand am längsten
-        # unangetastet liegt. Der Ausfall seit April 2026 hätte die Routine
-        # 98 Tage lang nie ausgeführt.
-        # Was hier NICHT läuft, ist die Wegfall-Markierung: die braucht einen
-        # vollständigen Abruf, sonst gälte der Ausfall als Massenwegfall.
-        _betreffe_nachziehen(conn)
-        _fristen_anwenden(conn)
-        conn.close()
-        return 1
-
-    count_new = 0
-    count_muell = 0
-
-    for m in meldungen:
-        mid  = make_id(m)
-        lat, lon = extract_coords(m)
-        muell = is_muell(m)
-        datum = (m.get("erstellungsDatum") or m.get("datum") or
-                 m.get("erstelltAm") or m.get("created_at") or now[:10])
-        # erstellungsDatum ist das echte API-Feld; normalisieren auf YYYY-MM-DD
-        datum_raw = datum
-        if datum and len(datum) >= 10 and datum[2] == '.':
-            # Format "DD.MM.YYYY ..." aus der API
-            try:
-                datum = datetime.strptime(datum[:10], "%d.%m.%Y").strftime("%Y-%m-%d")
-            except ValueError:
-                log.warning("Unbekanntes Datumsformat fuer Meldung %s: %r", mid, datum_raw)
-                datum = now[:10]
-
-        # DSGVO-Datenminimierung: Nicht-Müll-Meldungen nicht persistieren.
-        # Sie können Beschwerden gegen identifizierbare Personen enthalten.
-        if not muell:
-            continue
-
-        if conn.execute("SELECT id FROM meldungen WHERE id=?", (mid,)).fetchone():
-            continue
-
-        # H-02: strasse-Fallback strikt — kein Rückfall auf generische Adress-
-        # felder (adresse, address, ort), die Hausnummern enthalten könnten.
-        strasse = m.get("strasse") or m.get("street") or ""
-        # Hausnummer-Suffix am String-Ende entfernen (z.B. "12a", "14-18b").
-        strasse = re.sub(r'\s+\d+[a-zA-Z]?(\s*[-/]\s*\d+[a-zA-Z]?)?\s*$', '', strasse).strip()
-        plz_val = m.get("plz") or m.get("postleitzahl") or m.get("zip") or ""
-
-        # A-14: Betrefftexte, die eine Lebenssituation offenlegen, werden VOR
-        # dem Schreiben entschärft — nicht erst beim Export. Einmal gespeichert
-        # wäre die Angabe im Bestand, in jeder Sicherung und in jedem Klon.
-        kategorie_roh = m.get("kategorie") or m.get("category", "")
-        betreff_roh = m.get("betreff") or m.get("subject", "")
-        betreff_sicher, regeln = betreff_filter.entschaerfe(betreff_roh, kategorie_roh)
-        if regeln:
-            # Bewusst ohne den Originaltext im Protokoll — sonst stünde die
-            # Angabe in tracker.log, die der Filter gerade aus der Datenbank
-            # heraushält.
-            log.info("Betreff entschärft (Meldung %s, Regel %s)", mid, ",".join(regeln))
-
-        conn.execute("""
-            INSERT INTO meldungen
-                (id, fetched_at, datum, kategorie, betreff, bezirk, lat, lon, status, is_muell, strasse, plz)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            mid, now, datum,
-            kategorie_roh,
-            betreff_sicher,
-            m.get("bezirk")    or m.get("district",  ""),
-            lat, lon,
-            m.get("status", ""),
-            1,
-            strasse, str(plz_val)
-        ))
-        count_new += 1
-        count_muell += 1
-
-    conn.commit()
-
-    # ── A-4: Löschroutine (Art. 5 Abs. 1 lit. e) ──────────────────────────────
-    # Zuerst festhalten, was noch in der Quelle steht. Das wertet nur ein
-    # vollständiger Abruf aus — ein halber Abruf würde sonst den halben
-    # Bestand fälschlich zur Löschung vormerken.
-    vollstaendig, begruendung = retention.feed_vollstaendig(conn, len(meldungen))
-    if vollstaendig:
-        praesenz = retention.markiere_quellpraesenz(conn, (make_id(m) for m in meldungen), now)
-        if praesenz.get("abgebrochen"):
-            log.warning("Quellabgleich abgebrochen: %s", praesenz["begruendung"])
-        else:
-            log.info("Quellabgleich: %d Meldungen weiter in der Quelle, %d neu als "
-                     "weggefallen markiert (%s)",
-                     praesenz["in_quelle"], praesenz["neu_als_weggefallen_markiert"],
-                     begruendung)
-    else:
-        log.warning("Abruf nicht als vollständig gewertet (%s) — Wegfall-Markierung "
-                    "übersprungen, es wird nichts neu vorgemerkt.", begruendung)
-
-    _betreffe_nachziehen(conn)
-    _fristen_anwenden(conn)
-
+    Aus run() herausgeloest, damit der Rueckimport (rueckimport.py) dieselbe
+    Rechnung benutzt statt einer zweiten Fassung davon. Fachlich unveraendert.
+    """
     # ── Hotspot-Berechnung ────────────────────────────────────────────────────
+    # T-49: nur der Bestand dieser Stadt. Die Zellen der anderen Staedte werden
+    # von deren eigenem Lauf gepflegt und duerfen hier weder neu berechnet noch
+    # als verwaist eingestuft werden.
     muell_rows = conn.execute("""
         SELECT id, datum, lat, lon, bezirk, strasse, plz
         FROM meldungen
-        WHERE is_muell=1 AND lat IS NOT NULL AND lon IS NOT NULL
+        WHERE is_muell=1 AND lat IS NOT NULL AND lon IS NOT NULL AND stadt=?
         ORDER BY datum ASC
-    """).fetchall()
+    """, (quelle.stadt,)).fetchall()
 
     clusters: dict[str, dict] = {}
     for row in muell_rows:
@@ -489,6 +478,11 @@ def run():
         if row["strasse"]:
             c["adressen"].append((row["strasse"], row["plz"] or ""))
 
+    # T-49: das Wiederkehr-Fenster gehoert der Stadt, nicht dem Modul. Der
+    # Berliner Wert (14 Tage Abfuhr plus 7 Tage Puffer) beschreibt den Berliner
+    # Reinigungsrhythmus und ist auf eine andere Stadt nicht uebertragbar —
+    # siehe quellen.py, wo je Stadt steht, worauf der Wert beruht.
+    fenster = quelle.wiederkehr_fenster_tage
     for cid, c in clusters.items():
         dates_sorted = sorted(c["dates"])
         for i in range(1, len(dates_sorted)):
@@ -496,7 +490,7 @@ def run():
                 d1 = datetime.fromisoformat(dates_sorted[i-1][:10])
                 d2 = datetime.fromisoformat(dates_sorted[i][:10])
                 gap = (d2 - d1).days
-                if 0 < gap <= (DISPOSAL_DAYS + 7):
+                if 0 < gap <= fenster:
                     c["recurrence"] += 1
             except Exception:
                 pass
@@ -534,9 +528,10 @@ def run():
             INSERT INTO hotspots
                 (cluster_id, lat_center, lon_center, bezirk, meldungen_count,
                  recurrence_count, last_seen, first_seen, score, score_label,
-                 strasse, plz)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                 strasse, plz, stadt)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(cluster_id) DO UPDATE SET
+                stadt            = excluded.stadt,
                 meldungen_count  = excluded.meldungen_count,
                 recurrence_count = excluded.recurrence_count,
                 last_seen        = excluded.last_seen,
@@ -554,36 +549,208 @@ def run():
                 plz              = excluded.plz
         """, (cid, lat_c, lon_c, c["bezirk"], len(c["dates"]),
               c["recurrence"], last, first, score, label,
-              best_strasse, best_plz))
+              best_strasse, best_plz, quelle.stadt))
 
     conn.commit()
 
     # ── Nachlauf: Altbestand an die neuen Regeln angleichen ───────────────────
     # Ohne diesen Schritt würden Zellen, die vor A-2/A-7 angelegt wurden oder
     # deren Meldungen die Löschroutine entfernt hat, unbegrenzt stehenbleiben.
+    #
+    # T-66 (15.08.2026, Befund K-03): Diese Bereinigung lief bis hierher über
+    # ALLE Städte. Gemessen hat ein einziger Kölner Lauf die Berliner Zellen von
+    # 8.748 auf 5.839 gesenkt, während die Berliner Meldungen unangetastet
+    # blieben. Datenschutzrechtlich war jede einzelne dieser Löschungen richtig
+    # — die Zellen trugen weniger als HOTSPOT_MIN_PERSIST Meldungen und hätten
+    # nach A-2 nie liegen dürfen. Falsch war, WER sie gelöscht hat: eine Stadt
+    # räumt hier im Bestand einer anderen auf. Berlin ist dabei der Sonderfall,
+    # der aus dem Schönheitsfehler ein Risiko macht: die Berliner Quelle ist
+    # seit dem 22.04.2026 tot, es wird nie wieder einen Berliner Lauf geben, der
+    # eine zu Unrecht entfernte Zelle neu aufbaut. Würde HOTSPOT_MIN_PERSIST je
+    # angehoben, nähme ein Kölner Lauf Berlin unwiederbringlich Zellen weg.
     entfernt_einzelfall = conn.execute(
-        "DELETE FROM hotspots WHERE meldungen_count < ?", (HOTSPOT_MIN_PERSIST,)
+        "DELETE FROM hotspots WHERE meldungen_count < ? AND stadt = ?",
+        (HOTSPOT_MIN_PERSIST, quelle.stadt)
     ).rowcount
+    # A-7 dagegen bleibt BEWUSST stadtblind, und das ist keine vergessene Hälfte
+    # von T-66, sondern die Bedingung dafür, dass ein Widerspruch nach Art. 21
+    # DSGVO überhaupt wirkt. Dieselbe Begründung trägt schon sperrliste.laden():
+    #
+    #   1. Eine Zell-Kennung ist eine auf ~150 m gerundete Koordinate und damit
+    #      weltweit eindeutig. Zwei Städte können sich in derselben Zelle nicht
+    #      begegnen — ein Stadt-Filter hätte hier nichts zu trennen, er könnte
+    #      nur etwas übersehen.
+    #   2. Die ausfallsichere Zweitschrift sperrliste.txt führt KEINE Stadt.
+    #      Jeder von dort zurückgespielte Eintrag trägt den Vorgabewert
+    #      'berlin'. Mit einem Stadt-Filter fiele ein so wiederhergestellter
+    #      Widerspruch bei jedem Kölner Lauf still aus der Sperre heraus.
+    #   3. Berlin läuft nicht mehr. Ein Widerspruch gegen eine Berliner Zelle
+    #      würde mit Stadt-Filter von keinem Lauf mehr vollzogen — die Zeile
+    #      bliebe stehen, obwohl ihr ausdrücklich widersprochen wurde.
+    #
+    # Zu breit sperren kann keine Daten offenlegen, zu eng sperren schon. Die
+    # Richtung des Fehlers entscheidet. Bewacht von
+    # test_staedte.py::test_sperre_greift_auch_bei_fremdem_stadtlauf.
     entfernt_gesperrt = conn.execute(
         "DELETE FROM hotspots WHERE cluster_id IN (SELECT cluster_id FROM sperrliste)"
     ).rowcount
     # Verwaiste Zellen: keine Meldung mehr im Bestand (Folge der Löschroutine).
+    # T-49: NUR die Zellen dieser Stadt prüfen. clusters enthält ausschließlich
+    # Zellen aus dem Bestand dieser Stadt — ohne den Filter gälte jede Zelle einer
+    # anderen Stadt als verwaist und würde bei jedem Berliner Lauf gelöscht.
     bekannt = set(clusters.keys())
-    verwaist = [r[0] for r in conn.execute("SELECT cluster_id FROM hotspots")
-                if r[0] not in bekannt]
+    verwaist = [r[0] for r in conn.execute(
+        "SELECT cluster_id FROM hotspots WHERE stadt=?", (quelle.stadt,))
+        if r[0] not in bekannt]
     if verwaist:
         conn.executemany("DELETE FROM hotspots WHERE cluster_id = ?",
                          [(c,) for c in verwaist])
     conn.commit()
-    log.info("Zellen-Bereinigung: %d Einzelfall-Zellen nicht angelegt, %d aus dem "
-             "Altbestand entfernt, %d gesperrt entfernt, %d verwaist entfernt",
-             uebersprungen_einzelfall, entfernt_einzelfall, entfernt_gesperrt,
-             len(verwaist))
+    log.info("Zellen-Bereinigung [%s]: %d Einzelfall-Zellen nicht angelegt, %d aus dem "
+             "Altbestand entfernt, %d verwaist entfernt (alle drei nur %s); "
+             "%d gesperrt entfernt (stadtuebergreifend, A-7)",
+             quelle.stadt, uebersprungen_einzelfall, entfernt_einzelfall,
+             len(verwaist), quelle.stadt, entfernt_gesperrt)
+
+    return {
+        "zellen": len(clusters),
+        "uebersprungen_einzelfall": uebersprungen_einzelfall,
+        "entfernt_einzelfall": entfernt_einzelfall,
+        "entfernt_gesperrt": entfernt_gesperrt,
+        "entfernt_verwaist": len(verwaist),
+    }
+
+
+def run(stadt: str = None, zeitraum=None):
+    """Ein Lauf fuer genau eine Stadt.
+
+    ``stadt`` waehlt den Eintrag aus quellen.py; ohne Angabe laeuft Berlin wie
+    bisher. ``zeitraum`` reicht ein Abrufintervall an Quellen durch, die eines
+    kennen (Open311); der Berliner Feed kennt keines und ignoriert es.
+    """
+    quelle = quellen.hole(stadt or STADT)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    init_db(conn)
+
+    now = datetime.utcnow().isoformat()
+    log.info("Lauf fuer %s (%s)", quelle.name, quelle.stadt)
+    try:
+        meldungen = (quelle.hole_meldungen(zeitraum) if zeitraum is not None
+                     else quelle.hole_meldungen())
+    except open311.AbrufFehler as fehler:
+        # Auflage 3c aus T-49: ein unplausibles Ergebnis ist ein Ausfall und
+        # KEIN Befund. Der Lauf endet wie ein leerer Abruf — mit Fehlermarke im
+        # Abrufprotokoll und ohne Neuaufbau der Zellen.
+        log.error("Abruf fuer %s gescheitert: %s", quelle.stadt, fehler)
+        meldungen = []
+    log.info("%d Meldungen von der Quelle %s erhalten", len(meldungen), quelle.stadt)
+
+    # H-02b: Leerer Abruf darf NICHT still als Erfolg durchgehen. Sonst läuft
+    # die Pipeline über alte Daten weiter und das Frontend behauptet weiter
+    # "tagesaktuell". Fehler-Marker in fetch_log (count_total=-1) schreiben und
+    # mit Exit-Code != 0 abbrechen, damit der Launcher den Push überspringt.
+    if not meldungen:
+        log.error("Abruf fuer %s lieferte 0 Meldungen — Ausfall oder leerer "
+                  "Feed. Pipeline wird abgebrochen, kein Hotspot-Neuaufbau, "
+                  "kein Push.", quelle.stadt)
+        conn.execute("""
+            INSERT INTO fetch_log (fetched_at, count_total, count_new, count_muell, stadt)
+            VALUES (?,?,?,?,?)
+        """, (now, -1, 0, 0, quelle.stadt))
+        conn.commit()
+        # A-4 / Finding H-01 (29.07.2026): Die Fristen laufen AUCH hier.
+        # Die Speicherbegrenzung nach Art. 5 Abs. 1 lit. e darf nicht daran
+        # hängen, dass die Schnittstelle der Behörde erreichbar ist — sonst
+        # steht die Löschung genau dann still, wenn der Bestand am längsten
+        # unangetastet liegt. Der Ausfall seit April 2026 hätte die Routine
+        # 98 Tage lang nie ausgeführt.
+        # Was hier NICHT läuft, ist die Wegfall-Markierung: die braucht einen
+        # vollständigen Abruf, sonst gälte der Ausfall als Massenwegfall.
+        _betreffe_nachziehen(conn)
+        _fristen_anwenden(conn)
+        conn.close()
+        return 1
+
+    count_new = 0
+    count_muell = 0
+
+    for m in meldungen:
+        # Die Zuordnung auf unsere Spalten macht die Quelle. Sie gibt None
+        # zurueck, wenn die Meldung nicht muellnah ist — dann wird sie gar
+        # nicht erst gespeichert (DSGVO-Datenminimierung: Nicht-Muell enthaelt
+        # Beschwerden gegen identifizierbare Personen).
+        satz = quelle.aufbereiten(m, now)
+        if satz is None:
+            continue
+
+        if conn.execute("SELECT id FROM meldungen WHERE id=?",
+                        (satz["id"],)).fetchone():
+            continue
+
+        conn.execute("""
+            INSERT INTO meldungen
+                (id, fetched_at, datum, kategorie, betreff, bezirk, lat, lon, status,
+                 is_muell, strasse, plz, stadt)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            satz["id"], now, satz["datum"],
+            satz["kategorie"],
+            satz["betreff"],
+            satz["bezirk"],
+            satz["lat"], satz["lon"],
+            satz["status"],
+            1,
+            satz["strasse"], str(satz["plz"]),
+            quelle.stadt
+        ))
+        count_new += 1
+        count_muell += 1
+
+    conn.commit()
+
+    # ── A-4: Löschroutine (Art. 5 Abs. 1 lit. e) ──────────────────────────────
+    # Zuerst festhalten, was noch in der Quelle steht. Das wertet nur ein
+    # vollständiger Abruf aus — ein halber Abruf würde sonst den halben
+    # Bestand fälschlich zur Löschung vormerken.
+    # T-49 / Befund 2: beides rechnet ausschliesslich innerhalb dieser Stadt.
+    # Stadtblind wuerde ein Koelner Lauf den gesamten Berliner Bestand als aus
+    # der Quelle verschwunden vormerken und 30 Tage spaeter loeschen.
+    # T-49: Quellen, deren Abruf ein ZEITRAUM und nicht der Bestand ist, nehmen
+    # an diesem Schritt gar nicht teil. Sonst gaelte jede Meldung ausserhalb des
+    # Abrufzeitraums als aus der Quelle verschwunden. Begruendung ausfuehrlich
+    # in quellen.Quelle.quellabgleich_moeglich.
+    if not quelle.quellabgleich_moeglich:
+        log.info("Quellabgleich fuer %s entfaellt bewusst: der Abruf liefert "
+                 "einen Zeitraum und nicht den Bestand. Abwesenheit ist hier "
+                 "kein Wegfall.", quelle.stadt)
+    else:
+        vollstaendig, begruendung = retention.feed_vollstaendig(
+            conn, len(meldungen), quelle.stadt)
+        if vollstaendig:
+            praesenz = retention.markiere_quellpraesenz(
+                conn, (quelle.kennung(m) for m in meldungen), now, quelle.stadt)
+            if praesenz.get("abgebrochen"):
+                log.warning("Quellabgleich abgebrochen: %s", praesenz["begruendung"])
+            else:
+                log.info("Quellabgleich: %d Meldungen weiter in der Quelle, %d neu als "
+                         "weggefallen markiert (%s)",
+                         praesenz["in_quelle"], praesenz["neu_als_weggefallen_markiert"],
+                         begruendung)
+        else:
+            log.warning("Abruf nicht als vollständig gewertet (%s) — Wegfall-Markierung "
+                        "übersprungen, es wird nichts neu vorgemerkt.", begruendung)
+
+    _betreffe_nachziehen(conn)
+    _fristen_anwenden(conn)
+
+    # ── Hotspot-Berechnung ────────────────────────────────────────────────────
+    berechne_hotspots(conn, quelle)
 
     conn.execute("""
-        INSERT INTO fetch_log (fetched_at, count_total, count_new, count_muell)
-        VALUES (?,?,?,?)
-    """, (now, len(meldungen), count_new, count_muell))
+        INSERT INTO fetch_log (fetched_at, count_total, count_new, count_muell, stadt)
+        VALUES (?,?,?,?,?)
+    """, (now, len(meldungen), count_new, count_muell, quelle.stadt))
     conn.commit()
 
     hotspots_gesamt = conn.execute("SELECT COUNT(*) FROM hotspots").fetchone()[0]
@@ -594,5 +761,20 @@ def run():
 
 
 if __name__ == "__main__":
+    import argparse
     import sys
-    sys.exit(run())
+
+    p = argparse.ArgumentParser(description="Muell-Tracker, ein Lauf je Stadt")
+    p.add_argument("--stadt", default=STADT,
+                   choices=sorted(quellen.ALLE),
+                   help=f"Stadt dieses Laufs (Vorgabe: {STADT})")
+    p.add_argument("--tage", type=int, default=None,
+                   help="nur bei Open311-Quellen: Zeitraum der letzten N Tage. "
+                        "Ohne Angabe liefert die Quelle ihren Standardzeitraum.")
+    args = p.parse_args()
+
+    abrufzeitraum = None
+    if args.tage is not None:
+        abrufzeitraum = open311.zeitraum_tage(datetime.utcnow(), args.tage)
+
+    sys.exit(run(args.stadt, abrufzeitraum))

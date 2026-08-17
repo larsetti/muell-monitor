@@ -280,8 +280,9 @@ def test_a14_filter_greift_beim_schreiben_nicht_erst_beim_export(tmp_path, monke
 
     conn = sqlite3.connect(tmp_path / "run.db")
     gespeichert = dict(conn.execute("SELECT id, betreff FROM meldungen").fetchall())
-    assert gespeichert["1"] == f"{betreff_filter.MARKER} - sperrmüll", gespeichert
-    assert gespeichert["2"] == "Abfall - Sperrmüll", gespeichert
+    # T-49 (15.08.2026): die Kennung traegt seither die Stadt.
+    assert gespeichert["berlin:1"] == f"{betreff_filter.MARKER} - sperrmüll", gespeichert
+    assert gespeichert["berlin:2"] == "Abfall - Sperrmüll", gespeichert
 
 
 def test_a14_bestandsabgleich_laeuft_auch_bei_leerem_abruf(tmp_path, monkeypatch):

@@ -758,7 +758,8 @@ def test_m02_first_seen_ueberlebt_die_loeschung_der_aeltesten_meldung_nicht(tmp_
 
     # Die aelteste Meldung faellt weg, zwei neue kommen dazu (die Zelle muss die
     # Persistenz-Schwelle weiter erreichen).
-    conn.execute("DELETE FROM meldungen WHERE id='alt'")
+    # T-49 (15.08.2026): die Kennung traegt seither die Stadt.
+    conn.execute("DELETE FROM meldungen WHERE id='berlin:alt'")
     conn.commit()
     conn.close()
 

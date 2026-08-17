@@ -67,9 +67,15 @@ def ensure_table(conn: sqlite3.Connection):
             cluster_id TEXT PRIMARY KEY,
             grund      TEXT NOT NULL DEFAULT '',
             quelle     TEXT NOT NULL DEFAULT '',
-            erfasst_am TEXT NOT NULL
+            erfasst_am TEXT NOT NULL,
+            stadt      TEXT NOT NULL DEFAULT 'berlin'
         )
     """)
+    try:
+        conn.execute("ALTER TABLE sperrliste ADD COLUMN stadt "
+                     "TEXT NOT NULL DEFAULT 'berlin'")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
 
 
@@ -113,20 +119,29 @@ def _datei_lesen(pfad: Path = None) -> dict[str, tuple[str, str]]:
 
 def _datei_schreiben(conn: sqlite3.Connection, pfad: Path = None):
     pfad = pfad or SPERRLISTE_DATEI
+    # Das Dateiformat bleibt bewusst unveraendert ohne Stadt (siehe laden()).
     zeilen = [f"{cid}  # {quelle or '-'} | {grund}"
-              for cid, grund, quelle, _ in auflisten(conn)]
+              for cid, grund, quelle, _, _ in auflisten(conn)]
     pfad.write_text(DATEI_KOPF + "\n".join(zeilen) + "\n", encoding="utf-8")
 
 
 def eintragen(conn: sqlite3.Connection, cluster_id: str, grund: str = "",
-              quelle: str = "", erfasst_am: str = None, datei: Path = None):
-    """Sperrt eine Zelle dauerhaft in Datenbank und Zweitschrift. Idempotent."""
+              quelle: str = "", erfasst_am: str = None, datei: Path = None,
+              stadt: str = "berlin"):
+    """Sperrt eine Zelle dauerhaft in Datenbank und Zweitschrift. Idempotent.
+
+    `stadt` wird mitgefuehrt, damit sich ein Widerspruch der richtigen Stadt
+    zuordnen laesst. Fuer die WIRKUNG der Sperre ist sie ohne Belang — siehe
+    laden().
+    """
     cid = pruefe_cluster_id(cluster_id)
     ensure_table(conn)
     conn.execute(
-        "INSERT INTO sperrliste (cluster_id, grund, quelle, erfasst_am) VALUES (?,?,?,?) "
-        "ON CONFLICT(cluster_id) DO UPDATE SET grund=excluded.grund, quelle=excluded.quelle",
-        (cid, grund, quelle, erfasst_am or datetime.utcnow().isoformat())
+        "INSERT INTO sperrliste (cluster_id, grund, quelle, erfasst_am, stadt) "
+        "VALUES (?,?,?,?,?) "
+        "ON CONFLICT(cluster_id) DO UPDATE SET grund=excluded.grund, "
+        "quelle=excluded.quelle, stadt=excluded.stadt",
+        (cid, grund, quelle, erfasst_am or datetime.utcnow().isoformat(), stadt)
     )
     _datei_schreiben(conn, datei)
 
@@ -145,6 +160,21 @@ def laden(conn: sqlite3.Connection, datei: Path = None) -> set[str]:
     Einträge, die nur in der Datei stehen (etwa nach einem Neuaufbau der
     Datenbank), werden dabei in die Datenbank zurückgespielt. Die Sperre wirkt
     also sofort und nicht erst nach einem manuellen Abgleich.
+
+    BEWUSST OHNE STADT-FILTER, und das bleibt auch so (T-49, 15.08.2026). Zwei
+    Gründe, beide tragen für sich:
+
+    1. Eine Zell-Kennung ist eine gerundete Koordinate und damit weltweit
+       eindeutig. Zwei Städte können sich in derselben Zelle nicht begegnen,
+       ein Filter hätte also nichts zu trennen.
+    2. Die Zweitschrift `sperrliste.txt` führt keine Stadt. Würde `laden()`
+       nach Stadt filtern, bekäme jeder aus der Datei zurückgespielte Eintrag
+       den Vorgabewert `berlin` und fiele bei einem Kölner Lauf still aus der
+       Sperre heraus. Ein Widerspruch nach Art. 21 DSGVO wäre damit unwirksam,
+       ohne dass irgendwo ein Fehler erschiene.
+
+    Zu breit sperren kann keine Daten offenlegen, zu eng sperren schon. Die
+    Richtung des Fehlers entscheidet, und deshalb bleibt die Prüfung stadtblind.
     """
     ensure_table(conn)
     aus_db = {r[0] for r in conn.execute("SELECT cluster_id FROM sperrliste")}
@@ -163,7 +193,8 @@ def laden(conn: sqlite3.Connection, datei: Path = None) -> set[str]:
 def auflisten(conn: sqlite3.Connection) -> list[tuple]:
     ensure_table(conn)
     return conn.execute(
-        "SELECT cluster_id, grund, quelle, erfasst_am FROM sperrliste ORDER BY erfasst_am"
+        "SELECT cluster_id, grund, quelle, erfasst_am, stadt FROM sperrliste "
+        "ORDER BY erfasst_am"
     ).fetchall()
 
 
@@ -177,13 +208,17 @@ def main():
     p.add_argument("--remove", metavar="CLUSTER_ID", help="Sperre aufheben")
     p.add_argument("--grund", default="Widerspruch nach Art. 21 DSGVO")
     p.add_argument("--quelle", default="", help="Aktenzeichen des Vorgangs, KEIN Name")
+    p.add_argument("--stadt", default="berlin",
+                   help="Stadt des Vorgangs (nur zur Zuordnung, die Sperre wirkt "
+                        "unabhaengig davon)")
     args = p.parse_args()
 
     conn = sqlite3.connect(args.db)
     try:
         if args.add or args.add_koordinate:
             cid = args.add or cluster_id_fuer(*args.add_koordinate)
-            eintragen(conn, cid, grund=args.grund, quelle=args.quelle)
+            eintragen(conn, cid, grund=args.grund, quelle=args.quelle,
+                      stadt=args.stadt)
             conn.commit()
             print(f"Gesperrt: {cid}")
             print("Wirksam nach dem naechsten tracker.py- bzw. export_html.py-Lauf.")
@@ -196,8 +231,8 @@ def main():
             zeilen = auflisten(conn)
             if not zeilen:
                 print("Sperrliste ist leer.")
-            for cid, grund, quelle, erfasst in zeilen:
-                print(f"{cid}  {erfasst[:10]}  {quelle or '-'}  {grund}")
+            for cid, grund, quelle, erfasst, stadt in zeilen:
+                print(f"{cid}  {erfasst[:10]}  {stadt}  {quelle or '-'}  {grund}")
             print(f"\n{len(zeilen)} gesperrte Zelle(n).")
     finally:
         conn.close()

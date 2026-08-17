@@ -126,8 +126,60 @@ REGELN = {
               r"|mieterin|familie|herr|frau)\s+[A-ZÄÖÜ][a-zäöüß]{2,}",
 }
 
+# ── Regelwerk je Stadt (T-49, 15.08.2026) ────────────────────────────────────
+# Auflage A-18 der Folgenabschaetzung in der Fassung 1.1: der Freitextfilter
+# gilt JE STADT. Der Berliner Satz oben bleibt woertlich, wie er ist — er ist an
+# 538 verschiedenen Werten geprueft, und jede Aenderung daran wuerde beim
+# naechsten Lauf den vorhandenen Bestand anfassen.
+#
+# Fuer Koeln ist der Satz an den echten Daten gemessen worden (15.08.2026,
+# 3.705 Freitexte aus 4.000 Meldungen vom 01.07. bis 12.08.2026):
+#
+#   * Die Berliner Regeln allein greifen bei 75 von 3.705 Freitexten (2,0 %).
+#   * Sie erzeugen dabei sichtbare Fehltreffer, weil Koelner Meldungen in
+#     ganzen Saetzen geschrieben sind: "verwahrlostes Fahrrad" loest
+#     ``gesundheit`` aus, "Zeltinger Str." loest ``obdachlosigkeit`` aus,
+#     "Frau heftig" loest ``person`` aus.
+#   * Was die Berliner Liste NICHT kennt, steckt in den Koelner Texten sehr
+#     wohl drin: Kfz-Kennzeichen (19 Treffer), Telefonnummern (6),
+#     Mailadressen (2), Hausnummern in der Form "Nr. 36" (112).
+#
+# Daraus folgt beides: die Zusatzregeln unten, UND die Entscheidung in
+# ``quellen.py``, den Koelner Freitext gar nicht erst zu uebernehmen. Eine
+# Wortliste, die 2 Prozent erwischt, traegt keinen Bestand aus frei
+# geschriebenen Saetzen. Der Filter ist hier die zweite Reihe, nicht die erste.
+REGELN_ZUSATZ_KOELN = {
+    # Amtliches Kennzeichen. Bewusst ohne IGNORECASE gedacht, aber die
+    # gemeinsame Uebersetzung unten arbeitet mit IGNORECASE; die Ziffernfolge
+    # traegt die Unterscheidung.
+    "kennzeichen": r"\b[A-ZÄÖÜ]{1,3}\s?-\s?[A-Z]{1,2}\s?\d{1,4}\b",
+    "kontaktdaten": r"[\w.+-]+@[\w-]+\.\w{2,}|\b0\d{2,4}[\s/-]?\d[\d\s-]{5,}\b",
+}
+
+REGELN_KOELN = {**REGELN, **REGELN_ZUSATZ_KOELN}
+
+REGELN_JE_STADT = {
+    "berlin": REGELN,
+    "koeln": REGELN_KOELN,
+}
+
+# Ohne Eintrag gilt der Berliner Satz. Eine neue Stadt bekommt damit einen
+# Schutz und nicht keinen — schwaecher als noetig ist besser als offen.
+STADT_STANDARD = "berlin"
+
 _REGELN = {name: re.compile(muster, re.IGNORECASE)
            for name, muster in REGELN.items()}
+
+_REGELN_JE_STADT = {
+    stadt: {name: re.compile(muster, re.IGNORECASE)
+            for name, muster in satz.items()}
+    for stadt, satz in REGELN_JE_STADT.items()
+}
+
+
+def regeln_fuer(stadt: str | None):
+    return _REGELN_JE_STADT.get(stadt or STADT_STANDARD,
+                                _REGELN_JE_STADT[STADT_STANDARD])
 
 # ── Regelgruppe 2: Hausnummern im Freitext ───────────────────────────────────
 # Straßenwort, gefolgt von einer Hausnummer oder einer Spanne ("4-10",
@@ -144,10 +196,11 @@ _HAUSNUMMER = re.compile(
 )
 
 
-def treffer(betreff: str) -> list[str]:
+def treffer(betreff: str, stadt: str | None = None) -> list[str]:
     """Namen der Regeln aus Gruppe 1, die auf den Betreff zutreffen."""
     text = betreff or ""
-    return sorted(name for name, muster in _REGELN.items() if muster.search(text))
+    return sorted(name for name, muster in regeln_fuer(stadt).items()
+                  if muster.search(text))
 
 
 def _gruppe(kategorie: str, betreff: str) -> str | None:
@@ -156,14 +209,33 @@ def _gruppe(kategorie: str, betreff: str) -> str | None:
     return export_html.kategorisiere(f"{kategorie or ''} {betreff or ''}")
 
 
-def entschaerfe(betreff: str, kategorie: str = "") -> tuple[str, list[str]]:
+# Zweite Bauart einer Hausnummer, die in den Kölner Freitexten vorkommt und in
+# den Berliner nicht: "Hs Nr. 36", "Hausnummer 49". 112 von 3.705 gemessen.
+# Bewusst NICHT für Berlin aktiv — der Berliner Bestand ist an der vorhandenen
+# Regel geprüft, und eine zusätzliche Regel würde beim nächsten Lauf 82.780
+# Zeilen erneut anfassen, ohne dass jemand die Wirkung gemessen hätte.
+_HAUSNUMMER_WORT = re.compile(
+    r"\b(?:Hs\.?\s*)?(?:Nr\.?|Hausnummer|Haus-?Nr\.?)\s*\d+\s*[a-zA-Z]?"
+    r"(?:\s*(?:-|bis|und|/)\s*\d+\s*[a-zA-Z]?)*",
+    re.IGNORECASE,
+)
+
+_HAUSNUMMER_ZUSATZ_JE_STADT = {
+    "koeln": (_HAUSNUMMER_WORT,),
+}
+
+
+def entschaerfe(betreff: str, kategorie: str = "",
+                stadt: str | None = None) -> tuple[str, list[str]]:
     """Gibt den zu speichernden Betreff und die ausgelösten Regeln zurück.
 
     Ohne Treffer kommt der Betreff unverändert zurück — bis auf eine etwaige
     Hausnummer, die immer fällt.
+
+    ``stadt`` wählt das Regelwerk (A-18). Ohne Angabe gilt der Berliner Satz.
     """
     text = betreff or ""
-    regeln = treffer(text)
+    regeln = treffer(text, stadt)
 
     if regeln:
         # Gruppe VOR dem Verwerfen ableiten, sonst geht die Kategorisierung
@@ -173,6 +245,8 @@ def entschaerfe(betreff: str, kategorie: str = "") -> tuple[str, list[str]]:
         return ersatz, regeln
 
     ohne_nummer = _HAUSNUMMER.sub(r"\1", text)
+    for zusatz in _HAUSNUMMER_ZUSATZ_JE_STADT.get(stadt or STADT_STANDARD, ()):
+        ohne_nummer = zusatz.sub("", ohne_nummer)
     if ohne_nummer != text:
         # Doppelte Leerzeichen und ein Komma-Rest wie "…straße , 13086" glätten.
         ohne_nummer = re.sub(r"\s{2,}", " ", ohne_nummer)
@@ -189,30 +263,40 @@ def bestand_nachziehen(conn: sqlite3.Connection, dry_run: bool = False) -> dict:
     Läuft über die verschiedenen Werte, nicht über die Zeilen: 538 Prüfungen
     statt 82.780. Wiederholbar — ein bereits entschärfter Wert löst keine Regel
     mehr aus und wird nicht erneut angefasst.
+
+    T-49 / A-18: gruppiert nach STADT UND Wert, und schreibt auch stadtscharf
+    zurück. Zwei Gründe. Erstens gilt je Stadt ein eigenes Regelwerk, ein Wert
+    kann also in der einen Stadt fallen und in der anderen stehen bleiben.
+    Zweitens würde ein stadtblindes UPDATE das Ergebnis der einen Stadt auf die
+    gleichlautenden Zeilen der anderen übertragen — dieselbe Sorte stiller
+    Übergriff, die T-51 aus der Löschroutine entfernt hat.
     """
     werte = conn.execute(
-        "SELECT betreff, COUNT(*) FROM meldungen "
-        "WHERE betreff IS NOT NULL AND betreff <> '' GROUP BY betreff"
+        "SELECT stadt, betreff, COUNT(*) FROM meldungen "
+        "WHERE betreff IS NOT NULL AND betreff <> '' GROUP BY stadt, betreff"
     ).fetchall()
 
-    aenderungen: list[tuple[str, str, int, list[str]]] = []
-    for alt, anzahl in werte:
-        neu, regeln = entschaerfe(alt)
+    # (stadt, alt, neu, anzahl, regeln)
+    aenderungen: list[tuple[str, str, str, int, list[str]]] = []
+    for stadt, alt, anzahl in werte:
+        neu, regeln = entschaerfe(alt, stadt=stadt)
         if neu != alt:
-            aenderungen.append((alt, neu, anzahl, regeln))
+            aenderungen.append((stadt, alt, neu, anzahl, regeln))
 
     if aenderungen and not dry_run:
-        conn.executemany("UPDATE meldungen SET betreff = ? WHERE betreff = ?",
-                         [(neu, alt) for alt, neu, _, _ in aenderungen])
+        conn.executemany(
+            "UPDATE meldungen SET betreff = ? WHERE stadt = ? AND betreff = ?",
+            [(neu, stadt, alt) for stadt, alt, neu, _, _ in aenderungen])
         conn.commit()
 
-    lebenslagen = [a for a in aenderungen if a[3] != ["hausnummer"]]
+    lebenslagen = [a for a in aenderungen if a[4] != ["hausnummer"]]
     return {
         "werte_geprueft": len(werte),
         "werte_geaendert": len(aenderungen),
-        "zeilen_geaendert": sum(a[2] for a in aenderungen),
+        "zeilen_geaendert": sum(a[3] for a in aenderungen),
         "lebenssituation": len(lebenslagen),
         "hausnummer": len(aenderungen) - len(lebenslagen),
+        # (stadt, alt, neu, anzahl, regeln)
         "aenderungen": aenderungen,
     }
 
@@ -240,8 +324,8 @@ def main() -> int:
     print(f"  betroffene Zeilen:                  {ergebnis['zeilen_geaendert']}")
     if ergebnis["aenderungen"]:
         print()
-        for alt, neu, anzahl, regeln in ergebnis["aenderungen"]:
-            print(f"  [{','.join(regeln)}] {anzahl}x")
+        for stadt, alt, neu, anzahl, regeln in ergebnis["aenderungen"]:
+            print(f"  [{stadt}] [{','.join(regeln)}] {anzahl}x")
             print(f"      vorher:  {alt!r}")
             print(f"      nachher: {neu!r}")
     return 0

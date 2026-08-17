@@ -9,7 +9,14 @@
 
 set -e
 
-REPO_URL="https://github.com/larsetti/OA-Plus.git"
+# T-68 (15.08.2026, Befund K-07): Hier stand bis heute OA-Plus. Dieses
+# Repository ist am 02.08.2026 unter T-31 GELOESCHT worden — Massnahme A-15 der
+# Folgenabschaetzung, weil rund 70 historische Fassungen der Karte mit
+# feiner aufgeloesten Ortsdaten ueber seine Historie oeffentlich abrufbar
+# waren. Seine Adressen antworten mit 404. Ein frischer Pi-Aufbau ist an
+# dieser Zeile gescheitert, seit sechs Wochen und unbemerkt, weil das Skript
+# nur beim Neuaufsetzen laeuft. Nicht auf OA-Plus zurueckstellen.
+REPO_URL="https://github.com/larsetti/muell-monitor.git"
 INSTALL_DIR="$HOME/muell-monitor"
 VENV_DIR="$INSTALL_DIR/.venv"
 
@@ -55,7 +62,30 @@ echo "[5/5] Cronjob einrichten..."
 # Ebenso soll ein fehlgeschlagener Abruf (tracker.py Code 1 bei leerem Feed)
 # den Export nicht verhindern: der Wartungs-Lock haengt nicht am Abruf, und
 # das Frontend zeigt ohnehin nur den letzten ERFOLGREICHEN Abruf als Stand.
-CRON_CMD="0 6 * * * cd $INSTALL_DIR && { $VENV_DIR/bin/python tracker.py; $VENV_DIR/bin/python export_html.py; git add index.html; git diff --staged --quiet || git commit -m \"Auto-Update: \$(date '+\%Y-\%m-\%d')\"; git push; } >> $INSTALL_DIR/cron.log 2>&1"
+#
+# T-62 (15.08.2026), drei Aenderungen an dieser Zeile:
+#   1. Ein Lauf JE STADT, jede ausdruecklich genannt. Vorher lief nur
+#      "tracker.py", also Berlin, und Berlin liefert seit dem 22.04.2026
+#      nichts. Der Koeln-Adapter war gebaut und wurde nie aufgerufen.
+#   2. "export_html.py" ohne Zusatz baut jetzt die Staedte-Struktur statt einer
+#      stadtblinden Einzelseite, die Berliner und Koelner Zellen mischt.
+#   3. Der Pfadfilter '*/index.html' nimmt berlin/, koeln/ und die
+#      Umlaut-Weiterleitung mit. Ohne ihn zeigt die Startseite auf Adressen,
+#      die 404 liefern. Die einfachen Anfuehrungszeichen landen woertlich im
+#      crontab; ausgewertet wird das Muster von Git, nicht von der Shell.
+# T-64 (15.08.2026): Sicherung VOR der Erfassung, und die beiden Tracker-Laeufe
+# haengen als einzige Schritte mit && daran. Das ist die einzige Ausnahme von
+# der ;-Regel oben, und sie hat denselben Grund wie die Regel selbst: der
+# taegliche Lauf loescht. tracker.run ruft am Ende retention.anwenden auf, und
+# die laeuft ueber JEDE Stadt - sobald Koeln taeglich laeuft, tickt Berlins
+# Frist mit. Der Berliner Bestand ist nicht nachbeschaffbar. Ohne Sicherung wird
+# deshalb nicht erfasst. Export und Push bleiben davon unberuehrt und laufen
+# weiter mit ; verkettet, sonst waere A-11 wieder ausgehebelt.
+# --wenn-vorhanden: bei einem frischen Aufbau gibt es noch keine Datenbank. Ohne
+# den Zusatz wuerde die Sicherung scheitern, der Tracker nie laufen und deshalb
+# auch nie eine Datenbank entstehen - die Kette haette sich selbst blockiert.
+# tests/test_launcher.py wird rot, wenn eine Stadt oder der Pfadfilter fehlt.
+CRON_CMD="0 6 * * * cd $INSTALL_DIR && { $VENV_DIR/bin/python sicherung.py --wenn-vorhanden && { $VENV_DIR/bin/python tracker.py --stadt berlin; $VENV_DIR/bin/python tracker.py --stadt koeln; }; $VENV_DIR/bin/python export_html.py; git add index.html '*/index.html'; git diff --staged --quiet || git commit -m \"Auto-Update: \$(date '+\%Y-\%m-\%d')\"; git push; } >> $INSTALL_DIR/cron.log 2>&1"
 
 # Bestehenden Cronjob ersetzen falls vorhanden
 (crontab -l 2>/dev/null | grep -v "muell-monitor\|tracker.py"; echo "$CRON_CMD") | crontab -
@@ -67,7 +97,7 @@ echo "Cronjob:  Taeglich 06:00 Uhr"
 echo ""
 echo "WICHTIG: Git Push braucht Authentifizierung."
 echo "Entweder SSH-Key oder Token einrichten:"
-echo "  git remote set-url origin git@github.com:larsetti/OA-Plus.git"
+echo "  git remote set-url origin git@github.com:larsetti/muell-monitor.git"
 echo "  oder: gh auth login"
 echo ""
-echo "Testen mit: cd $INSTALL_DIR && $VENV_DIR/bin/python tracker.py"
+echo "Testen mit: cd $INSTALL_DIR && $VENV_DIR/bin/python tracker.py --stadt berlin"

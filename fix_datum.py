@@ -13,6 +13,8 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+import tracker
+
 DB_PATH = Path(__file__).parent / "ordnungsamt.db"
 JSON_PATH = Path(__file__).parent / "meldungen.json"
 
@@ -46,7 +48,11 @@ def run():
     updates = []
     skipped = 0
     for m in meldungen:
-        mid = str(m.get("id", ""))
+        # T-49: meldungen.json ist ein Berliner Schnappschuss, die Kennungen
+        # darin sind roh. In der Datenbank stehen sie seit dem 15.08.2026 mit
+        # Stadt-Praefix; ohne das Praefix hier traefe kein einziges UPDATE, und
+        # zwar lautlos, weil ein UPDATE ohne Treffer kein Fehler ist.
+        mid = tracker.make_id(m, "berlin") if m.get("id") else ""
         raw = m.get("erstellungsDatum") or m.get("datum") or ""
         datum = parse_datum(raw)
         if datum and mid:
