@@ -25,7 +25,14 @@ import re
 from pathlib import Path
 
 BASIS = Path(__file__).parent
-SEITEN = ["template.html", "maintenance.html", "index.html"]
+# startseite.html steht seit dem 17.08.2026 mit in der Liste (T-71). Sie bindet
+# montserrat.css mit Pruefsumme ein und war als einzige Vorlage nicht dabei —
+# ein "python sri.py --schreiben" zog alle anderen nach und liess sie mit der
+# alten Angabe stehen. Der naechste Bau schrieb die veraltete Pruefsumme dann
+# in die ausgelieferte Startseite zurueck, wo der Browser die Schrift nicht
+# mehr geladen haette. Gefunden beim Nachziehen der Schrift-Pruefsummen;
+# bewacht von tests/test_dsgvo_auflagen.py.
+SEITEN = ["template.html", "maintenance.html", "startseite.html", "index.html"]
 
 # <script src="..."> und <link rel="stylesheet" href="...">, jeweils mit
 # optionalem integrity-Attribut in beliebiger Reihenfolge.

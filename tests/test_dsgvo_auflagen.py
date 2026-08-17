@@ -432,7 +432,11 @@ def test_a7_cluster_id_fuer_koordinate_passt_zum_tracker(tmp_path):
 
 # ── A-12: keine Fremdhosts, CSP und SRI ──────────────────────────────────────
 
-AUSGELIEFERTE_SEITEN = ["template.html", "maintenance.html", "index.html"]
+# startseite.html kam am 17.08.2026 dazu (T-71). Sie fehlte hier genauso wie in
+# sri.SEITEN, und die zwei Luecken deckten sich gegenseitig zu: kein Test sah
+# sich die Startseite an, und "sri.py --schreiben" zog sie nicht nach.
+AUSGELIEFERTE_SEITEN = ["template.html", "maintenance.html", "startseite.html",
+                        "index.html"]
 
 # tile.openstreetmap.org bleibt zwingend extern (Kartenkacheln lassen sich
 # nicht mitliefern) und ist in der Datenschutzerklaerung als Empfaenger gefuehrt.
@@ -476,6 +480,36 @@ def test_a12_sri_pruefsummen_stimmen():
         html = (TECHNIK / name).read_text(encoding="utf-8")
         fehler = sri.pruefe_html(html, TECHNIK)
         assert not fehler, f"{name}: {fehler}"
+
+
+def test_a12_keine_seite_mit_pruefsumme_faellt_aus_der_liste(tmp_path):
+    """Beide Listen muessen jede Seite kennen, die eine Pruefsumme traegt.
+
+    Der Anlass (T-71, 17.08.2026): startseite.html stand weder in sri.SEITEN
+    noch in AUSGELIEFERTE_SEITEN. Die zwei Luecken deckten sich gegenseitig
+    zu — kein Test schaute hin, und "sri.py --schreiben" zog alle anderen nach
+    und liess die Startseite mit der veralteten Angabe stehen. Der naechste Bau
+    schrieb sie in die ausgelieferte Seite zurueck, wo der Browser die Schrift
+    dann nicht mehr geladen haette.
+
+    Eine Liste von Hand zu pflegen ist genau die Sorte Arbeit, die man
+    vergisst. Deshalb wird hier gegen das Verzeichnis geprueft und nicht gegen
+    eine zweite Liste.
+    """
+    mit_pruefsumme = {p.name for p in TECHNIK.glob("*.html")
+                      if "integrity=" in p.read_text(encoding="utf-8")}
+    fehlend_sri = mit_pruefsumme - set(sri.SEITEN)
+    fehlend_test = mit_pruefsumme - set(AUSGELIEFERTE_SEITEN)
+
+    assert not fehlend_sri, (
+        f"Diese Seiten tragen eine Pruefsumme, stehen aber nicht in "
+        f"sri.SEITEN: {sorted(fehlend_sri)}. 'sri.py --schreiben' zieht sie "
+        f"nicht nach, und die Angabe veraltet stillschweigend."
+    )
+    assert not fehlend_test, (
+        f"Diese Seiten tragen eine Pruefsumme, werden hier aber nicht "
+        f"geprueft: {sorted(fehlend_test)}."
+    )
 
 
 def test_a12_template_hat_sri_auf_allen_skripten():
