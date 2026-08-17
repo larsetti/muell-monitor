@@ -3,24 +3,24 @@ Tests zu K-12: der Bezirk einer Zelle ist ihr Mehrheitswert
 ===========================================================
 Befund K-12 der Abnahme vom 15.08.2026, umgesetzt unter T-68 am 17.08.2026.
 
-`tracker.berechne_hotspots` bestimmt die Strasse einer Zelle ueber
-`Counter.most_common`, den Bezirk uebernahm es dagegen aus der ERSTEN Meldung.
+`tracker.berechne_hotspots` bestimmt die Straße einer Zelle über
+`Counter.most_common`, den Bezirk übernahm es dagegen aus der ERSTEN Meldung.
 War das eine ohne Stadtteil, blieb die ganze Zelle ohne — obwohl der Wert in
 ihren uebrigen Meldungen steht.
 
 GEMESSEN am 15.08.2026 gegen eine Kopie der Betriebsdatenbank: von den 281
-Koelner Zellen ab drei Meldungen ohne Bezirk fuehren 185 den Stadtteil in einer
-anderen ihrer eigenen Meldungen, also 66 Prozent. Mit der Mehrheitsregel faellt
+Kölner Zellen ab drei Meldungen ohne Bezirk führen 185 den Stadtteil in einer
+anderen ihrer eigenen Meldungen, also 66 Prozent. Mit der Mehrheitsregel fällt
 die Zahl leerer Zellen von 281 auf 96 (8,1 auf 2,8 Prozent). Berlin ist nicht
 betroffen, dort ist keine Zelle leer.
 
 WARUM GENAU SO UND NICHT ANDERS: Es entsteht kein neues Datum, ein bereits
 gespeichertes wird nur richtig ausgewaehlt — die Risikobewertung der
-Folgenabschaetzung bleibt unberuehrt. Der naheliegende zweite Weg, den
-Stadtteil aus der Postleitzahl abzuleiten, waere neue Ortsinformation erzeugen
-statt vorhandene lesen und muesste durch die Bewertung. Deshalb bleibt auch
-`open311.zerlege_adresse` unangetastet: die Bauart "50739 Koeln,
-Wilensteinweg 13" fuehrt schlicht keinen Stadtteil, der Parser uebersieht
+Folgenabschätzung bleibt unberührt. Der naheliegende zweite Weg, den
+Stadtteil aus der Postleitzahl abzuleiten, wäre neue Ortsinformation erzeugen
+statt vorhandene lesen und müsste durch die Bewertung. Deshalb bleibt auch
+`open311.zerlege_adresse` unangetastet: die Bauart "50739 Köln,
+Wilensteinweg 13" führt schlicht keinen Stadtteil, der Parser übersieht
 nichts.
 """
 
@@ -67,14 +67,14 @@ def _lauf(conn):
 # ── Der eigentliche Befund K-12 ──────────────────────────────────────────────
 
 def test_erste_meldung_ohne_stadtteil_macht_die_zelle_nicht_leer(tmp_path):
-    """Der Kern. Die aelteste Meldung fuehrt keinen Stadtteil, die beiden
+    """Der Kern. Die älteste Meldung führt keinen Stadtteil, die beiden
     juengeren schon — die Zelle muss ihn trotzdem tragen.
 
     Die Reihenfolge ist nicht zufaellig: berechne_hotspots liest mit
-    ORDER BY datum ASC, die aelteste Meldung war also die erste.
+    ORDER BY datum ASC, die älteste Meldung war also die erste.
     """
     conn = _db(tmp_path)
-    _meldung(conn, "koeln:1", "2026-01-01", "")           # aelteste, ohne
+    _meldung(conn, "koeln:1", "2026-01-01", "")           # älteste, ohne
     _meldung(conn, "koeln:2", "2026-02-01", "Ehrenfeld", versatz=0.0001)
     _meldung(conn, "koeln:3", "2026-03-01", "Ehrenfeld", versatz=0.0002)
     _lauf(conn)
@@ -82,18 +82,18 @@ def test_erste_meldung_ohne_stadtteil_macht_die_zelle_nicht_leer(tmp_path):
     conn.close()
 
     assert ergebnis == "Ehrenfeld", (
-        f"Die Zelle traegt '{ergebnis}' statt 'Ehrenfeld'. Der Bezirk wird "
-        f"also weiterhin aus der ersten Meldung uebernommen statt als "
+        f"Die Zelle trägt '{ergebnis}' statt 'Ehrenfeld'. Der Bezirk wird "
+        f"also weiterhin aus der ersten Meldung übernommen statt als "
         f"Mehrheitswert bestimmt (Befund K-12). Auf der Karte steht dann "
-        f"'Adresse unvollstaendig', obwohl der Stadtteil in der Datenbank liegt."
+        f"'Adresse unvollständig', obwohl der Stadtteil in der Datenbank liegt."
     )
 
 
 def test_mehrheit_entscheidet_nicht_das_alter(tmp_path):
     """Gegenprobe zur naheliegenden Verwechslung: nicht 'der erste nicht-leere
-    Wert' gewinnt, sondern der haeufigste — genau wie bei der Strasse."""
+    Wert' gewinnt, sondern der haeufigste — genau wie bei der Straße."""
     conn = _db(tmp_path)
-    _meldung(conn, "koeln:1", "2026-01-01", "Nippes")      # aelteste
+    _meldung(conn, "koeln:1", "2026-01-01", "Nippes")      # älteste
     _meldung(conn, "koeln:2", "2026-02-01", "Ehrenfeld", versatz=0.0001)
     _meldung(conn, "koeln:3", "2026-03-01", "Ehrenfeld", versatz=0.0002)
     _lauf(conn)
@@ -101,15 +101,15 @@ def test_mehrheit_entscheidet_nicht_das_alter(tmp_path):
     conn.close()
 
     assert ergebnis == "Ehrenfeld", (
-        f"Die Zelle traegt '{ergebnis}'. Erwartet war der Mehrheitswert "
-        f"'Ehrenfeld' (zweimal) statt des aeltesten Werts 'Nippes' (einmal)."
+        f"Die Zelle trägt '{ergebnis}'. Erwartet war der Mehrheitswert "
+        f"'Ehrenfeld' (zweimal) statt des ältesten Werts 'Nippes' (einmal)."
     )
 
 
 def test_zelle_ohne_jeden_stadtteil_bleibt_leer(tmp_path):
     """Die Grenze der Abhilfe, und sie ist Absicht. Fuehrt KEINE Meldung der
     Zelle einen Stadtteil, wird auch keiner erfunden — 'Adresse
-    unvollstaendig' ist dort die ehrliche Anzeige (96 Koelner Zellen)."""
+    unvollständig' ist dort die ehrliche Anzeige (96 Kölner Zellen)."""
     conn = _db(tmp_path)
     _meldung(conn, "koeln:1", "2026-01-01", "")
     _meldung(conn, "koeln:2", "2026-02-01", "", versatz=0.0001)
@@ -118,18 +118,18 @@ def test_zelle_ohne_jeden_stadtteil_bleibt_leer(tmp_path):
     conn.close()
 
     assert not ergebnis, (
-        f"Die Zelle traegt '{ergebnis}', obwohl keine ihrer Meldungen einen "
-        f"Stadtteil fuehrt. Es darf keiner abgeleitet werden — das waere neue "
-        f"Ortsinformation und muesste durch die Risikobewertung."
+        f"Die Zelle trägt '{ergebnis}', obwohl keine ihrer Meldungen einen "
+        f"Stadtteil führt. Es darf keiner abgeleitet werden — das wäre neue "
+        f"Ortsinformation und müsste durch die Risikobewertung."
     )
 
 
 def test_bestehende_zelle_bekommt_den_bezirk_nachtraeglich(tmp_path):
-    """Die zweite Haelfte von K-12, und die leicht zu uebersehende.
+    """Die zweite Hälfte von K-12, und die leicht zu uebersehende.
 
-    Die 185 Koelner Zellen, um die es geht, gibt es laengst. Stuende `bezirk`
-    nicht in der ON-CONFLICT-Klausel, gaelte die Mehrheitsregel nur fuer neu
-    angelegte Zellen und die Aenderung waere folgenlos — dieselbe Falle wie bei
+    Die 185 Kölner Zellen, um die es geht, gibt es laengst. Stuende `bezirk`
+    nicht in der ON-CONFLICT-Klausel, gaelte die Mehrheitsregel nur für neu
+    angelegte Zellen und die Änderung wäre folgenlos — dieselbe Falle wie bei
     `first_seen` unter Befund M-02.
     """
     conn = _db(tmp_path)
@@ -151,8 +151,8 @@ def test_bestehende_zelle_bekommt_den_bezirk_nachtraeglich(tmp_path):
     conn.close()
 
     assert ergebnis == "Ehrenfeld", (
-        f"Die bereits vorhandene Zelle traegt nach dem Lauf '{ergebnis}'. "
+        f"Die bereits vorhandene Zelle trägt nach dem Lauf '{ergebnis}'. "
         f"`bezirk` fehlt also in der ON-CONFLICT-Klausel von "
-        f"berechne_hotspots — die Mehrheitsregel greift dann nur fuer neu "
+        f"berechne_hotspots — die Mehrheitsregel greift dann nur für neu "
         f"angelegte Zellen, und genau die alten sind der Anlass gewesen."
     )

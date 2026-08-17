@@ -427,24 +427,24 @@ def stand_fuer_anzeige(iso: str | None) -> str:
 # HTML-Kommentare, einschliesslich mehrzeiliger. In keiner der Vorlagen steht
 # ein "<!--" oder "-->" innerhalb eines script- oder style-Blocks, das Muster
 # kann also nichts abschneiden, was kein Kommentar ist. Wer eine Vorlage
-# umbaut, prueft das mit -- der Test dazu haelt es fest.
+# umbaut, prüft das mit -- der Test dazu hält es fest.
 _KOMMENTAR = re.compile(r"<!--.*?-->", re.S)
 
-# Die Stil- und Skriptbloecke der Vorlagen sind ebenso ausfuehrlich
+# Die Stil- und Skriptbloecke der Vorlagen sind ebenso ausführlich
 # kommentiert wie das HTML drumherum, und die Kennungen stehen dort genauso.
-# In maintenance.html und template.html zusammen waren es 15 Stueck.
+# In maintenance.html und template.html zusammen waren es 15 Stück.
 _BLOCK_MIT_CODE = re.compile(r"<(style|script)\b[^>]*>(.*?)</\1>", re.S | re.I)
 
-# NUR Kommentare, die eine Zeile beginnen -- nach beliebig viel Einrueckung,
+# NUR Kommentare, die eine Zeile beginnen -- nach beliebig viel Einrückung,
 # aber ohne Code davor. Das ist die Bauart jedes dokumentierenden Kommentars
 # in diesen Vorlagen und zugleich die einzige, die sich ohne einen echten
-# Zerteiler fuer CSS und JavaScript sicher erkennen laesst: ein "/*" oder "//"
+# Zerteiler für CSS und JavaScript sicher erkennen lässt: ein "/*" oder "//"
 # mitten in einer Zeile kann in einer Zeichenkette stehen ("https://..." ist
 # der haeufigste Fall) und darf nicht angefasst werden.
 #
-# Die eine Luecke, die bleibt: eine mehrzeilige Zeichenkette in
-# Schraegstrich-Anfuehrung, deren Zeile mit "/*" oder "//" beginnt. In keiner
-# Vorlage gibt es das, und der Test dazu haelt es fest.
+# Die eine Lücke, die bleibt: eine mehrzeilige Zeichenkette in
+# Schrägstrich-Anführung, deren Zeile mit "/*" oder "//" beginnt. In keiner
+# Vorlage gibt es das, und der Test dazu hält es fest.
 _CODE_BLOCKKOMMENTAR = re.compile(r"^[ \t]*/\*.*?\*/[ \t]*\n?", re.S | re.M)
 _CODE_ZEILENKOMMENTAR = re.compile(r"^[ \t]*//[^\n]*\n?", re.M)
 
@@ -459,35 +459,35 @@ def _code_kommentare_entfernen(treffer: re.Match) -> str:
 def ohne_interne_kommentare(html: str) -> str:
     """Kommentare aus einer ausgelieferten Seite entfernen — HTML, CSS und JS.
 
-    Befund vom 17.08.2026. Die Kommentare in den Vorlagen sind ausfuehrlich,
+    Befund vom 17.08.2026. Die Kommentare in den Vorlagen sind ausführlich,
     und das ist gut so — sie sagen, warum eine Stelle so aussieht, wie sie
     aussieht. Ausgeliefert wurden sie bis hierher mit, samt interner
     Kennungen und samt der Beschreibung frueherer Schwaechen. Im Quelltext
-    der Wartungsseite stand woertlich, welche Fassung "bis hierher die IP
+    der Wartungsseite stand wörtlich, welche Fassung "bis hierher die IP
     jedes Besuchers an Google weitergegeben" hat, dazu Verweise wie "A-12
     (DSFA 28.07.2026)", "Bericht S-06" und "Befund H-04". Alles davon ist
-    behoben, und der Inhalt ist harmlos. Eine oeffentliche Seite muss ihre
+    behoben, und der Inhalt ist harmlos. Eine öffentliche Seite muss ihre
     eigene Fehlerhistorie trotzdem nicht mitliefern: sie nennt Datumsstaende
-    und interne Ordnungsnummern, aus denen sich ablesen laesst, wann was
+    und interne Ordnungsnummern, aus denen sich ablesen lässt, wann was
     offen war.
 
     ALLE Kommentare, nicht nur die mit Kennung. Eine Liste von Mustern
-    muesste jemand pflegen, und der erste Kommentar, der eine Schwaeche
+    müsste jemand pflegen, und der erste Kommentar, der eine Schwaeche
     beschreibt, ohne eine Kennung zu nennen, ginge still durch. Der Besucher
     braucht keinen einzigen davon, die Vorlage behaelt jeden.
 
     HTML, CSS UND JAVASCRIPT, weil die Kennungen in allen dreien stehen: 14 in
     den Stil- und Skriptbloecken von template.html, eine im Stilblock von
-    maintenance.html. Ein Filter nur fuer HTML-Kommentare haette den
-    auffaelligsten Teil erwischt und den groesseren stehen gelassen.
+    maintenance.html. Ein Filter nur für HTML-Kommentare hätte den
+    auffaelligsten Teil erwischt und den größeren stehen gelassen.
 
     Die Anker, an denen wartungsseite_fuer die Stadt-Texte einsetzt, sind
     echte HTML-Elemente und keine Kommentare — diese Funktion fasst sie nicht
-    an. Sie laeuft trotzdem erst NACH dem Einsetzen, damit die Reihenfolge
+    an. Sie läuft trotzdem erst NACH dem Einsetzen, damit die Reihenfolge
     keine Rolle spielt.
 
     Was sie NICHT ist: eine Verkleinerung der Seite. Dass die Wartungsseite
-    dabei um rund ein Fuenftel kuerzer wird, ist eine Nebenwirkung und kein
+    dabei um rund ein Fünftel kürzer wird, ist eine Nebenwirkung und kein
     Zweck — es wird nichts zusammengezogen und nichts umbenannt.
     """
     return _BLOCK_MIT_CODE.sub(_code_kommentare_entfernen,
@@ -838,8 +838,8 @@ def wartungsseite_fuer(stadt: Stadt, praefix: str = "../") -> str:
         "die Datenlizenz")
     html = mit_asset_praefix(html, praefix) if praefix else html
     # Erst hier, nach allen Ersetzungen: die Anker sind echte HTML-Elemente,
-    # aber so bleibt die Reihenfolge auch dann richtig, wenn spaeter jemand
-    # einen Kommentar-Anker einfuehrt.
+    # aber so bleibt die Reihenfolge auch dann richtig, wenn später jemand
+    # einen Kommentar-Anker einführt.
     return ohne_interne_kommentare(html)
 
 

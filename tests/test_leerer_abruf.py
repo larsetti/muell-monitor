@@ -1,32 +1,32 @@
 """
 Tests zu T-55: ein leerer Abruf darf keine Auflage aussetzen
 =============================================================
-Die Folgenabschaetzung vom 28.07.2026 sagt in Abhilfe A-2 (Risiken R-1 und
+Die Folgenabschätzung vom 28.07.2026 sagt in Abhilfe A-2 (Risiken R-1 und
 R-7), Zellen mit einer einzigen Meldung werden "gar nicht erst dauerhaft
 gespeichert". Umgesetzt war das an zwei Stellen: beim Anlegen in
-`tracker.berechne_hotspots` und als Nachlauf ueber den Altbestand am Ende
+`tracker.berechne_hotspots` und als Nachlauf über den Altbestand am Ende
 derselben Funktion.
 
-DER FEHLER: `tracker.run` kehrt bei einem leeren Abruf zurueck, BEVOR es
+DER FEHLER: `tracker.run` kehrt bei einem leeren Abruf zurück, BEVOR es
 berechne_hotspots erreicht (Befund H-02b, richtig so — aus einem leeren Abruf
-darf nichts neu aufgebaut werden). Damit lief auch der reine Loeschteil nicht
+darf nichts neu aufgebaut werden). Damit lief auch der reine Löschteil nicht
 mehr. Eine Datenschutz-Auflage hing also daran, dass eine fremde Schnittstelle
 antwortet.
 
-Das ist wortgleich die Lehre aus Befund H-01 vom 29.07.2026, wo genau das fuer
-die Loeschfristen behoben wurde: `_fristen_anwenden` laeuft seitdem auch im
+Das ist wortgleich die Lehre aus Befund H-01 vom 29.07.2026, wo genau das für
+die Löschfristen behoben wurde: `_fristen_anwenden` läuft seitdem auch im
 Leerpfad. `_zellen_auflagen_nachziehen` tut das seit dem 17.08.2026 ebenso.
 
 WIE ES AUFFIEL: 2.909 Berliner Einzelfall-Zellen lagen im Bestand. Berlins
 Quelle liefert seit dem 22.04.2026 nichts, jeder Berliner Lauf endete also im
-Leerpfad, und die Bereinigung kam dort nie an. Weggeraeumt hat sie am
-15.08.2026 ein Koelner Lauf, der stadtblind mitbereinigte — was seinerseits
-der Fehler war, den T-66 behoben hat. Nach T-66 haette Berlin sie behalten,
-ohne dass irgendwo etwas auffaellt.
+Leerpfad, und die Bereinigung kam dort nie an. Weggeräumt hat sie am
+15.08.2026 ein Kölner Lauf, der stadtblind mitbereinigte — was seinerseits
+der Fehler war, den T-66 behoben hat. Nach T-66 hätte Berlin sie behalten,
+ohne dass irgendwo etwas auffällt.
 
-DESHALB PRUEFT DIESE DATEI ZWEI DINGE ZUSAMMEN, nicht nacheinander: dass die
-Bereinigung ohne Abruf laeuft, UND dass sie dabei die unter T-66 eingezogene
-Stadt-Trennung nicht wieder aufweicht. Jede Haelfte allein waere zu haben,
+DESHALB PRÜFT DIESE DATEI ZWEI DINGE ZUSAMMEN, nicht nacheinander: dass die
+Bereinigung ohne Abruf läuft, UND dass sie dabei die unter T-66 eingezogene
+Stadt-Trennung nicht wieder aufweicht. Jede Hälfte allein wäre zu haben,
 indem man die andere kaputtmacht.
 """
 
@@ -99,7 +99,7 @@ def test_leerer_abruf_raeumt_die_eigenen_einzelfall_zellen_trotzdem_auf(
     db_pfad = _leerer_berliner_lauf(tmp_path, monkeypatch)
     conn = sqlite3.connect(db_pfad)
     tracker.init_db(conn)
-    # Zwei Berliner Einzelfall-Zellen, die es nach A-2 nicht geben duerfte,
+    # Zwei Berliner Einzelfall-Zellen, die es nach A-2 nicht geben dürfte,
     # und eine, die bleiben muss.
     _zelle(conn, BERLIN, "berlin", count=1)
     _zelle(conn, BERLIN_2, "berlin", count=1)
@@ -115,14 +115,14 @@ def test_leerer_abruf_raeumt_die_eigenen_einzelfall_zellen_trotzdem_auf(
     assert nachher == (0, 0, 0), (
         f"Nach einem leeren Berliner Abruf stehen noch {nachher[0]} Berliner "
         f"Zellen im Bestand, davon {nachher[1]} mit einer einzigen Meldung. "
-        f"Abhilfe A-2 der Folgenabschaetzung wird also nur vollzogen, solange "
+        f"Abhilfe A-2 der Folgenabschätzung wird also nur vollzogen, solange "
         f"die Schnittstelle antwortet — genau der Fehler aus Befund H-01. "
         f"tracker.run muss _zellen_auflagen_nachziehen auch im Leerpfad rufen."
     )
 
 
 def test_leerer_abruf_baut_keine_zellen_neu_auf(tmp_path, monkeypatch):
-    """Die Gegenprobe, und die Grenze der Abhilfe. Geloescht wird, gerechnet
+    """Die Gegenprobe, und die Grenze der Abhilfe. Gelöscht wird, gerechnet
     nicht — ein Neuaufbau aus einem leeren Abruf ist genau das, was Befund
     H-02b verbietet."""
     db_pfad = _leerer_berliner_lauf(tmp_path, monkeypatch)
@@ -141,8 +141,8 @@ def test_leerer_abruf_baut_keine_zellen_neu_auf(tmp_path, monkeypatch):
     conn.close()
 
     assert zellen == 0, (
-        "Der Leerpfad hat Zellen angelegt. Er darf ausschliesslich loeschen — "
-        "aus einem leeren Abruf neu zu rechnen hiesse, alten Bestand als "
+        "Der Leerpfad hat Zellen angelegt. Er darf ausschließlich löschen — "
+        "aus einem leeren Abruf neu zu rechnen hieße, alten Bestand als "
         "frisch auszugeben (Befund H-02b)."
     )
 
@@ -150,14 +150,14 @@ def test_leerer_abruf_baut_keine_zellen_neu_auf(tmp_path, monkeypatch):
 # ── Die Stadt-Trennung aus T-66 darf dabei nicht aufweichen ──────────────────
 
 def test_leerer_berliner_abruf_laesst_koelner_zellen_stehen(tmp_path, monkeypatch):
-    """Die zweite Haelfte. Der Nachlauf im Leerpfad ist eine Loeschung im
-    Zellenbestand — genau die Sorte Loeschung, die T-66 stadtscharf gemacht
-    hat. Ohne 'AND stadt = ?' raeumte ein leerer Berliner Lauf im Koelner
-    Bestand auf, und der Umbau vom 15.08.2026 waere still wieder zurueck."""
+    """Die zweite Hälfte. Der Nachlauf im Leerpfad ist eine Löschung im
+    Zellenbestand — genau die Sorte Löschung, die T-66 stadtscharf gemacht
+    hat. Ohne 'AND stadt = ?' räumte ein leerer Berliner Lauf im Kölner
+    Bestand auf, und der Umbau vom 15.08.2026 wäre still wieder zurück."""
     db_pfad = _leerer_berliner_lauf(tmp_path, monkeypatch)
     conn = sqlite3.connect(db_pfad)
     tracker.init_db(conn)
-    _zelle(conn, BERLIN, "berlin", count=1)     # faellt: eigene Stadt
+    _zelle(conn, BERLIN, "berlin", count=1)     # fällt: eigene Stadt
     _zelle(conn, KOELN, "koeln", count=1)       # bleibt: fremde Stadt
     _zelle(conn, KOELN_2, "koeln", count=5)     # bleibt ohnehin
     conn.commit()
@@ -172,7 +172,7 @@ def test_leerer_berliner_abruf_laesst_koelner_zellen_stehen(tmp_path, monkeypatc
         "Die eigene Einzelfall-Zelle muss fallen, sonst ist A-2 folgenlos."
     )
     assert uebrig.get(tracker.cluster_id(*KOELN)) == "koeln", (
-        f"Ein leerer BERLINER Lauf hat eine Koelner Zelle entfernt: {uebrig}. "
+        f"Ein leerer BERLINER Lauf hat eine Kölner Zelle entfernt: {uebrig}. "
         f"Die Bereinigung im Leerpfad muss auf die eigene Stadt begrenzt "
         f"bleiben (AND stadt = ?), sonst ist die Trennung aus T-66 im neuen "
         f"Pfad wieder aufgehoben."
@@ -183,7 +183,7 @@ def test_leerer_berliner_abruf_laesst_koelner_zellen_stehen(tmp_path, monkeypatc
 def test_leerer_abruf_laesst_fremde_meldungen_und_zellen_zeile_fuer_zeile_gleich(
         tmp_path, monkeypatch):
     """Breitere Fassung derselben Sorge: nach einem leeren Berliner Lauf muss
-    der gesamte Koelner Bestand unveraendert sein, Zellen wie Meldungen."""
+    der gesamte Kölner Bestand unverändert sein, Zellen wie Meldungen."""
     db_pfad = _leerer_berliner_lauf(tmp_path, monkeypatch)
     conn = sqlite3.connect(db_pfad)
     tracker.init_db(conn)
@@ -212,7 +212,7 @@ def test_leerer_abruf_laesst_fremde_meldungen_und_zellen_zeile_fuer_zeile_gleich
     conn.close()
 
     assert vorher == nachher, (
-        f"Ein leerer Berliner Lauf hat den Koelner Bestand veraendert.\n"
+        f"Ein leerer Berliner Lauf hat den Kölner Bestand verändert.\n"
         f"vorher:  {vorher}\nnachher: {nachher}"
     )
 
@@ -224,9 +224,9 @@ def test_leerer_abruf_vollzieht_den_widerspruch_auch_fuer_eine_fremde_stadt(
     """Der Gegenpol, aus demselben Grund wie in test_zellen_stadtscharf.py.
 
     A-2 ist stadtscharf, A-7 nicht. Eine Zell-Kennung ist eine gerundete
-    Koordinate und weltweit eindeutig, die Zweitschrift sperrliste.txt fuehrt
-    keine Stadt, und Berlin laeuft nur noch im Leerpfad. Bekaeme die Sperre
-    hier einen Stadt-Filter, wuerde ein Widerspruch gegen eine Koelner Zelle
+    Koordinate und weltweit eindeutig, die Zweitschrift sperrliste.txt führt
+    keine Stadt, und Berlin läuft nur noch im Leerpfad. Bekaeme die Sperre
+    hier einen Stadt-Filter, wuerde ein Widerspruch gegen eine Kölner Zelle
     von diesem Pfad nie vollzogen.
 
     Zu breit sperren kann nichts offenlegen, zu eng sperren schon.
@@ -234,7 +234,7 @@ def test_leerer_abruf_vollzieht_den_widerspruch_auch_fuer_eine_fremde_stadt(
     db_pfad = _leerer_berliner_lauf(tmp_path, monkeypatch)
     conn = sqlite3.connect(db_pfad)
     tracker.init_db(conn)
-    # Genug Meldungen, damit die Zelle NUR ueber die Sperre fallen kann.
+    # Genug Meldungen, damit die Zelle NUR über die Sperre fallen kann.
     _zelle(conn, KOELN, "koeln", count=9)
     conn.commit()
     sperrliste.eintragen(conn, tracker.cluster_id(*KOELN),
@@ -248,9 +248,9 @@ def test_leerer_abruf_vollzieht_den_widerspruch_auch_fuer_eine_fremde_stadt(
     conn.close()
 
     assert tracker.cluster_id(*KOELN) not in uebrig, (
-        "Die gesperrte Koelner Zelle steht nach einem leeren Berliner Lauf "
+        "Die gesperrte Kölner Zelle steht nach einem leeren Berliner Lauf "
         "noch im Bestand. Damit ist ein Widerspruch nach Art. 21 DSGVO in "
-        "diesem Pfad unwirksam. Die Sperr-Loeschung muss stadtblind bleiben — "
+        "diesem Pfad unwirksam. Die Sperr-Löschung muss stadtblind bleiben — "
         "anders als die Einzelfall-Regel daneben."
     )
 
@@ -288,9 +288,9 @@ def test_leerer_abruf_holt_die_sperre_aus_der_zweitschrift(tmp_path, monkeypatch
 def test_beide_pfade_benutzen_dieselbe_bereinigung(tmp_path, monkeypatch):
     """Sicherung gegen die naheliegende Verschlimmbesserung: den DELETE im
     Leerpfad noch einmal hinzuschreiben statt die Funktion zu rufen. Dann
-    laufen die beiden Wege beim naechsten Eingriff auseinander.
+    laufen die beiden Wege beim nächsten Eingriff auseinander.
 
-    Geprueft wird verhaltensgleich, nicht ueber den Quelltext: wer
+    Geprueft wird verhaltensgleich, nicht über den Quelltext: wer
     _zellen_auflagen_nachziehen ausser Kraft setzt, muss BEIDE Pfade
     stilllegen. Bleibt einer aktiv, hat er eine eigene Kopie der Regel.
     """
@@ -304,12 +304,12 @@ def test_beide_pfade_benutzen_dieselbe_bereinigung(tmp_path, monkeypatch):
     _zelle(conn, BERLIN_2, "berlin", count=1)
     _meldung(conn, "berlin:1", "2026-01-01", "berlin", BERLIN)
     _meldung(conn, "berlin:2", "2026-01-10", "berlin", BERLIN)
-    # Die Einzelfall-Zelle braucht ihre eine Meldung, sonst faellt sie schon
-    # ueber die Verwaisten-Regel und der Test misst die falsche Loeschung.
+    # Die Einzelfall-Zelle braucht ihre eine Meldung, sonst fällt sie schon
+    # über die Verwaisten-Regel und der Test misst die falsche Löschung.
     _meldung(conn, "berlin:3", "2026-02-01", "berlin", BERLIN_2)
     conn.commit()
 
-    # Pfad 1: der volle Lauf ueber berechne_hotspots
+    # Pfad 1: der volle Lauf über berechne_hotspots
     conn.row_factory = sqlite3.Row
     tracker.berechne_hotspots(conn, quellen.hole("berlin"))
     nach_vollem_lauf = conn.execute(
@@ -325,9 +325,9 @@ def test_beide_pfade_benutzen_dieselbe_bereinigung(tmp_path, monkeypatch):
     conn.close()
 
     assert nach_vollem_lauf == 1 and nach_leerem_lauf == 1, (
-        f"Mit stillgelegter _zellen_auflagen_nachziehen raeumt noch immer "
+        f"Mit stillgelegter _zellen_auflagen_nachziehen räumt noch immer "
         f"jemand auf (voller Lauf: {nach_vollem_lauf}, leerer Lauf: "
         f"{nach_leerem_lauf}, erwartet je 1 stehengebliebene Zelle). Einer der "
-        f"beiden Pfade hat also eine eigene Kopie der A-2-Loeschung statt die "
+        f"beiden Pfade hat also eine eigene Kopie der A-2-Löschung statt die "
         f"gemeinsame Funktion zu rufen."
     )

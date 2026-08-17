@@ -122,11 +122,11 @@ def hole_schriften():
         kopf = (f"/* {familie}: lokal ausgeliefert statt von fonts.gstatic.com\n"
                 f"   nachgezogen mit vendor_assets.py (Abhilfe A-12 der DSFA) */\n")
         # newline="\n" ist Pflicht, kein Schoenheitsfehler (T-71, 17.08.2026).
-        # Ohne die Angabe uebersetzt write_text jedes \n in die Zeilenende-Art
+        # Ohne die Angabe übersetzt write_text jedes \n in die Zeilenende-Art
         # des Betriebssystems, auf Windows also in \r\n. Die Datei sieht dann je
         # nach Rechner anders aus, auf dem sie beschafft wurde — und auf ihr
-        # steht eine sha384-Pruefsumme. Genau daran ist es haengengeblieben: die
-        # Pruefsumme war gegen die Windows-Fassung gesetzt, ausgeliefert wurde
+        # steht eine sha384-Prüfsumme. Genau daran ist es hängengeblieben: die
+        # Prüfsumme war gegen die Windows-Fassung gesetzt, ausgeliefert wurde
         # die Fassung aus dem Speicher. Die Bibliotheken darueber sind nicht
         # betroffen, die schreibt hole_bibliotheken byteweise.
         (ziel_dir / f"{familie}.css").write_text(kopf + "\n".join(ergebnis) + "\n",
