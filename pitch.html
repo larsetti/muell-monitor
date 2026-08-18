@@ -252,7 +252,7 @@ footer a:hover{text-decoration:underline}
         <div class="stat-desc">Orte mit mindestens zwei Meldungen am selben Standort</div>
       </div>
     </div>
-    <p style="font-size:11px;color:#999;margin-top:16px;text-align:center">Kennzahlen: Stand 22.04.2026 · der Abruf ist täglich getaktet</p>
+    <p style="font-size:11px;color:#999;margin-top:16px;text-align:center">Kennzahlen: Berliner Datenstand 22.04.2026 · die Quelle liefert seit diesem Tag keine neuen Meldungen</p>
   </div>
 </section>
 
@@ -262,7 +262,8 @@ footer a:hover{text-decoration:underline}
     <span class="eyebrow">Was der Monitor leistet</span>
     <h2 class="section-title">Fünf Werkzeuge, die in keiner kommunalen Akte stehen.</h2>
     <p class="section-lead">Jedes der folgenden Module läuft im Browser, ohne Installation, ohne Login,
-      auf Desktop und Mobil. Der Abruf der Ordnungsamt-Daten läuft täglich automatisch.</p>
+      auf Desktop und Mobil. Der Abruf der Meldedaten ist für den täglichen Betrieb gebaut und wird
+      bei der Einrichtung auf den Rhythmus der jeweiligen Stadt gesetzt.</p>
 
     <!-- Feature 1: Hotspot-Karte -->
     <div class="feature">
@@ -309,12 +310,12 @@ footer a:hover{text-decoration:underline}
     <div class="feature flip">
       <div>
         <div class="feature-num">02 — PROGNOSE</div>
-        <h3>Wo wird heute, diese Woche, in diesem Monat Müll erwartet?</h3>
-        <p>Aus Wochentag-Mustern, saisonalen Häufungen und Kalenderwoche-Vergleichen mit
-          Vorjahresdaten errechnet das Modell pro Standort eine Wahrscheinlichkeit.
-          Patrouillen können so präventiv statt reaktiv eingesetzt werden.</p>
+        <h3>Wann und wo Ablagerungen wiederkehren.</h3>
+        <p>Aus Wochentags-Mustern, saisonalen Häufungen und dem Vergleich mit dem Vorjahr
+          ergibt sich pro Standort ein Wiederkehr-Profil. Patrouillen lassen sich damit
+          vorausschauend planen statt auf Meldungen zu warten.</p>
         <ul>
-          <li>Drei Zeithorizonte: Heute · Diese Woche · Dieser Monat</li>
+          <li>Drei Betrachtungen: Wochentag · Saison · Monatsende</li>
           <li>Begründete Vorhersagen ("80 % an Montagen", "60 % im Frühling")</li>
           <li>Ein Klick → Karte zoomt zum Standort</li>
         </ul>
@@ -322,7 +323,7 @@ footer a:hover{text-decoration:underline}
       <div class="feature-visual">
         <div class="mock">
           <div class="mock-header" style="background:var(--gray-dark)">
-            <span>📅 Prognose · Di, 05.05.2026 · KW 19</span>
+            <span>📅 Wiederkehr-Profil · Mitte · Brunnenstr. 12</span>
           </div>
           <div class="mock-body">
             <div class="proglist">
@@ -337,7 +338,7 @@ footer a:hover{text-decoration:underline}
                 <div class="progg">58 % im Mai · saisonal</div></div></div>
               <div class="progrow"><span class="progprob">45%</span>
                 <div class="proginfo"><div class="progb">Friedrichshain · Boxhagener Pl.</div>
-                <div class="progg">45 % an Di · KW 19 historisch</div></div></div>
+                <div class="progg">45 % an Di · saisonal wiederkehrend</div></div></div>
             </div>
           </div>
         </div>
@@ -417,11 +418,11 @@ footer a:hover{text-decoration:underline}
     <div class="feature">
       <div>
         <div class="feature-num">05 — DATENPIPELINE</div>
-        <h3>Täglicher Abruf, automatisch, ohne lokale Installation.</h3>
-        <p>Eine voll automatisierte Pipeline holt jede Nacht den vollständigen Ordnungsamt-Feed,
-          klassifiziert müllrelevante Meldungen, berechnet Cluster und Score
-          und veröffentlicht die fertige Karte als statische Webseite — kein Server,
-          keine Datenbank-Wartung im Kunden-Setup.</p>
+        <h3>Automatischer Abruf im Tagesrhythmus, ohne lokale Installation.</h3>
+        <p>Die Pipeline holt den Meldedaten-Bestand der Stadt, erkennt müllrelevante Meldungen,
+          rechnet Cluster und Score und schreibt die fertige Karte als statische Webseite.
+          Einmal eingerichtet läuft sie ohne Zutun, im Regelfall nachts. Auf Kundenseite bleibt
+          kein Server und keine Datenbank-Pflege.</p>
         <ul>
           <li>Berlin Open-Data-API (offizieller Feed)</li>
           <li>Datensparsam: keine Cookies, kein Analytics-Tracking, statisches HTML</li>
@@ -432,7 +433,7 @@ footer a:hover{text-decoration:underline}
         <div class="pipeline">
           <div class="pipe-step"><div class="pipe-icon">1</div>
             <div class="pipe-title">API</div>
-            <div class="pipe-desc">Berlin Open Data — täglich 06:00</div></div>
+            <div class="pipe-desc">Offene Meldedaten der Stadt</div></div>
           <div class="pipe-step"><div class="pipe-icon">2</div>
             <div class="pipe-title">Klassifikation</div>
             <div class="pipe-desc">Müll-Keywords + Geo-Cluster</div></div>
@@ -486,10 +487,10 @@ footer a:hover{text-decoration:underline}
 <!-- LIVE-EINDRÜCKE -->
 <section class="alt">
   <div class="container">
-    <span class="eyebrow">Live-Eindrücke</span>
-    <h2 class="section-title">So sieht die laufende Anwendung aus.</h2>
-    <p class="section-lead">Echte Screenshots aus dem Live-System mit Berliner Daten —
-      kein Mockup. Stand: Pi-Datenbank am 6.&nbsp;Mai 2026.</p>
+    <span class="eyebrow">Aus der Anwendung</span>
+    <h2 class="section-title">So sieht die Anwendung aus.</h2>
+    <p class="section-lead">Echte Screenshots mit Berliner Daten, kein Mockup.
+      Aufgenommen am 6.&nbsp;Mai 2026.</p>
     <div class="shots">
       <figure class="shot">
         <img src="assets/screenshots/01_karte.png" alt="Hotspot-Karte mit echten Berliner Daten">
