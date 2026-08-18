@@ -51,11 +51,23 @@ weil Koeln seinen Freitext nicht uebernimmt — scharf, sobald eine Stadt ihn
 uebernimmt. Bewacht jetzt von
 ``test_der_eigene_regelsatz_einer_stadt_erreicht_den_filter_auch``.
 
-Ein Rueckbau bleibt bewusst gruen: die Plausibilitaetsschwelle traegt bei Bonner
-Dichte nicht mehr. Das ist keine Luecke im Test, sondern eine gemessene Luecke
-im Bau, und sie ist nicht im Alleingang zu schliessen — die Schwelle einer Stadt
-gehoert an deren eigene Daten gemessen. Sie steht als eigener Test am Ende
-dieser Datei, damit sie nicht in Vergessenheit geraet.
+Nachtrag 18.08.2026 — die eine offene Luecke ist geschlossen (T-79)
+-------------------------------------------------------------------
+Hier stand, ein Rueckbau bleibe bewusst gruen: die Plausibilitaetsschwelle
+trage bei Bonner Dichte nicht mehr, und der Riegel dafuer gehoere an die Daten
+der betroffenen Stadt gemessen. Er ist gebaut und steht in
+``plausibilitaet.py`` — er misst einen Abruf nicht mehr an einer gesetzten
+Zahl, sondern am eigenen Vorlauf DIESER Stadt aus ``fetch_log``. Damit kuerzt
+sich die Dichte heraus, und der Riegel sitzt in ``tracker.run`` statt in
+``open311.py``, weil er sonst Berlin wieder nicht saehe.
+
+Zwei Pruefsteine an echten Daten: er erkennt Berlins Ausfall ab dem ersten
+leeren Lauf am 23.04.2026 (Untergrenze 26.364 gegen einen Vorlauf von 105.456),
+und ueber 724 nachgestellte Koelner Wochen aus 731 Tagen echtem Bestand
+beanstandet er nichts — die knappste Annaeherung liegt bei Faktor 2,57.
+
+Was NICHT geschlossen ist, steht als eigener Test am Ende dieser Datei: im
+Rueckimport bleibt die alte, dichteabhaengige Regel die einzige Pruefung.
 
 Alle Beispieltexte sind erfunden. Echte Buerger-Freitexte gehoeren nicht in
 einen oeffentlichen Code-Speicher.
@@ -69,6 +81,7 @@ import pytest
 import betreff_filter
 import export_html
 import open311
+import plausibilitaet
 import quellen
 import sperrliste
 import tracker
@@ -773,45 +786,301 @@ def test_kein_eigener_freigabe_schalter_ohne_eigenen_namen():
         )
 
 
+# ── T-79: der Riegel, der die Dichte-Luecke schliesst ────────────────────────
+#
+# HIER STAND BIS ZUM 18.08.2026 EIN GRUENER TEST UEBER EINER BEKANNTEN LUECKE,
+# ``test_plausibilitaetsschwelle_traegt_bei_geringer_dichte_nicht_mehr``. Er
+# hielt fest, dass ``open311.pruefe_plausibel`` bei duenner Dichte auf "genau
+# eine Meldung" zusammenfaellt: Koeln 93,0 Meldungen je Tag bei Schwelle 5,0,
+# Bonn 1,7 je Tag, und wegen ``erwartet = max(1, int(tage * mindest_je_tag))``
+# verlangt die Woche des taeglichen Laufs dann eine Meldung, wo zwoelf faellig
+# sind. Ein Ausfall, der eine einzige durchlaesst, ging als gueltiger Lauf
+# durch.
+#
+# Ersetzt durch die Tests unten, die den Nachweis des neuen Riegels fuehren.
+# EINE EHRLICHE ANMERKUNG DAZU: der alte Test ist NICHT von selbst rot
+# geworden. Er prueft ``open311.pruefe_plausibel`` unmittelbar, und die
+# Funktion ist unveraendert geblieben — der neue Riegel sitzt eine Ebene
+# hoeher, in ``tracker.run``, weil er sonst Berlin wieder nicht sehen wuerde
+# (Berlins Feed laeuft nie durch ``open311.hole_zeitraum``). Was von der alten
+# Schwaeche uebrig bleibt, steht im letzten Test dieser Datei und ist dort
+# benannt statt weggeraeumt.
+
+def _protokoll(conn, stadt: str, werte, tage, plausibel=1):
+    """Vorlauf im Abrufprotokoll anlegen — so, wie ihn echte Laeufe hinterlassen."""
+    for n, wert in enumerate(werte):
+        conn.execute(
+            "INSERT INTO fetch_log (fetched_at, count_total, count_new, "
+            "count_muell, stadt, zeitraum_tage, plausibel) VALUES (?,?,?,?,?,?,?)",
+            (f"2026-01-{n + 1:02d}T04:00:00", wert, 0, 0, stadt, tage, plausibel))
+    conn.commit()
+
+
+def _leeres_protokoll():
+    conn = sqlite3.connect(":memory:")
+    tracker.init_db(conn)
+    return conn
+
+
+def test_der_mengenriegel_traegt_auch_bei_geringer_dichte():
+    """Der Nachweis, der die Luecke von oben schliesst.
+
+    Dieselbe Lage wie im ersetzten Test: eine Stadt mit 1,7 Meldungen je Tag,
+    ein taeglicher Lauf ueber sieben Tage, also rund zwoelf Meldungen je Abruf.
+    Ein Ausfall laesst eine einzige durch.
+
+    Die alte Regel verlangte ``max(1, int(7 * 0.09))`` = 1 und liess das
+    durchgehen. Der Mengenriegel misst am eigenen Vorlauf dieser Stadt und
+    verlangt ein Viertel davon — bei zwoelf Meldungen je Abruf also drei.
+    """
+    conn = _leeres_protokoll()
+    _protokoll(conn, "probstadt", [12, 11, 13, 12, 14, 10, 12, 13], tage=7.0)
+
+    # Die alte Regel liess genau das durch. Sie steht hier als Gegenprobe, damit
+    # der Unterschied im Test sichtbar ist und nicht nur im Bericht.
+    jetzt = datetime(2026, 8, 17)
+    woche = open311.Zeitraum(von=jetzt - timedelta(days=8),
+                             bis=jetzt - timedelta(days=1))
+    open311.pruefe_plausibel([{}], woche, 0.09, jetzt=jetzt)
+
+    with pytest.raises(plausibilitaet.AbrufUnplausibel) as fehler:
+        plausibilitaet.pruefe(conn, "probstadt", anzahl=1, tage=7.0)
+
+    assert "1 Meldungen erhalten" in str(fehler.value)
+    assert "mindestens 3" in str(fehler.value), (
+        "Der Riegel muss die Untergrenze aus dem eigenen Vorlauf ziehen "
+        f"(12 je Abruf, ein Viertel davon), nicht aus einer gesetzten Zahl. "
+        f"Meldung war: {fehler.value}")
+
+
+def test_der_mengenriegel_misst_dichte_und_duenne_stadt_am_selben_massstab():
+    """Der Kern von T-79: das Urteil haengt am Verhaeltnis, nicht an der Dichte.
+
+    Zwei Staedte, rund fuenfzigfach auseinander — Koeln mit 650 Meldungen je
+    Wochen-Abruf, eine duenne Stadt mit 12. Beide verlieren durch einen Ausfall
+    fuenf Sechstel ihres Aufkommens. Beide muessen auffallen.
+
+    Genau das konnte die feste Zahl je Stadt nicht: sie war fuer Koeln um den
+    Faktor 18,6 vom Normalstand entfernt und fuer eine duenne Stadt um den
+    Faktor 0,08.
+    """
+    for stadt, normal in (("dichtestadt", 650), ("duennestadt", 12)):
+        conn = _leeres_protokoll()
+        _protokoll(conn, stadt, [normal] * 8, tage=7.0)
+
+        # Ein Sechstel des Normalstands: Ausfall, in beiden Groessenordnungen.
+        with pytest.raises(plausibilitaet.AbrufUnplausibel):
+            plausibilitaet.pruefe(conn, stadt, anzahl=normal // 6, tage=7.0)
+
+        # Zwei Drittel des Normalstands: ruhige Woche, keine Beanstandung.
+        plausibilitaet.pruefe(conn, stadt, anzahl=int(normal * 0.66), tage=7.0)
+
+
+def test_der_mengenriegel_beanstandet_koelns_duennste_echte_woche_nicht():
+    """Pruefstein 2, mit den gemessenen Zahlen aus dem echten Bestand.
+
+    Ueber 731 Tage Koelner Bestand (12.12.2023 bis 15.08.2026, als gleitende
+    Sieben-Tage-Fenster) liegt die Woche im Median bei 318 Meldungen, die
+    duennste echte Woche bei 175 (11.02.2026, Karneval). Das sind 55 Prozent
+    des Medians — der Riegel steht bei 25 Prozent, also bleibt der Faktor 2,2
+    dazwischen.
+
+    Nachgemessen wurde der ganze Verlauf: 724 Laeufe, null Beanstandungen, die
+    knappste Annaeherung mit Faktor 2,57. Dieser Test haelt den engsten Punkt
+    fest, damit ein spaeter angehobener Anteil hier auflaeuft und nicht erst im
+    Betrieb.
+    """
+    conn = _leeres_protokoll()
+    _protokoll(conn, "koeln", [318] * 8, tage=7.0)
+
+    vermerk = plausibilitaet.pruefe(conn, "koeln", anzahl=175, tage=7.0)
+
+    assert vermerk["untergrenze"] == 79
+    assert 175 / vermerk["untergrenze"] > 2.0, (
+        "Zwischen Koelns duennster echter Woche und dem Ausloeser muss Luft "
+        "bleiben. Der Riegel soll einen Ausfall erkennen, keine Karnevalswoche.")
+
+
+def test_ein_ausfall_wird_nicht_selbst_zum_massstab():
+    """Der Vorlauf darf nicht altern, sonst hebt ein langer Ausfall sich selbst auf.
+
+    Berlins Quelle liefert seit dem 23.04.2026 nichts. Waehlte der Riegel
+    seinen Vorlauf nach Alter statt nach Anzahl, waere der Ausfall nach
+    wenigen Wochen der neue Normalstand und die Pruefung stumm — der Fehler,
+    den sie verhindern soll.
+
+    Nachgestellt mit Berlins echten Zahlen: 13 Laeufe mit 105.456 Meldungen im
+    Bestand, danach vierzehn Laeufe mit null. Auch der vierzehnte muss noch
+    anschlagen.
+    """
+    conn = _leeres_protokoll()
+    _protokoll(conn, "berlin", [105456] * 13, tage=None)
+
+    for lauf in range(14):
+        with pytest.raises(plausibilitaet.AbrufUnplausibel):
+            plausibilitaet.pruefe(conn, "berlin", anzahl=0, tage=None)
+        # Ein gerissener Lauf geht als solcher ins Protokoll und darf den
+        # Massstab nicht senken.
+        _protokoll(conn, "berlin", [-1], tage=None, plausibel=0)
+
+    werte = plausibilitaet.lies_vorlauf(conn, "berlin", ist_zeitraum_abruf=False)
+    assert plausibilitaet.basis(werte) == 105456, (
+        "Nach vierzehn Ausfaellen steht der Massstab nicht mehr auf dem letzten "
+        "gesunden Stand. Damit wuerde der Ausfall sich selbst zum Normalstand "
+        "erklaeren.")
+
+    # Der schwierigere Fall: ein TEILausfall. Er liefert etwas, wird vom Riegel
+    # aber abgelehnt — und darf trotzdem nicht in den Massstab. Ihn nur an der
+    # Fehlermarke -1 zu erkennen reicht nicht, denn diese Zeile traegt eine
+    # echte Zahl. Dafuer ist die Spalte ``plausibel`` da.
+    _protokoll(conn, "berlin", [8000] * 10, tage=None, plausibel=0)
+    werte = plausibilitaet.lies_vorlauf(conn, "berlin", ist_zeitraum_abruf=False)
+    assert plausibilitaet.basis(werte) == 105456, (
+        "Zehn abgelehnte Teilausfaelle mit je 8.000 Meldungen haben den Massstab "
+        "gesenkt. Eine langsam abbauende Quelle zoege ihn damit hinter sich her, "
+        "bis der Ausfall der Normalstand ist.")
+
+
+def test_der_massstab_ist_der_median_und_nicht_der_mittelwert():
+    """Ein einzelner Ausreisser nach oben darf die Untergrenze nicht anheben.
+
+    Ein nachgeholter Abruf oder ein Rueckimport bringt einmalig ein Vielfaches
+    des Alltags. Ueber den Mittelwert gerechnet misst die Pruefung danach an
+    einer Zahl, die es im Alltag nie gab — und jeder normale Lauf waere ein
+    Ausfall.
+    """
+    conn = _leeres_protokoll()
+    _protokoll(conn, "ausreisser", [12, 11, 13, 12, 14, 10, 12, 5000], tage=7.0)
+
+    werte = plausibilitaet.lies_vorlauf(conn, "ausreisser", ist_zeitraum_abruf=True)
+    # Median der Tagesmengen: 12/7 herum, nicht (5000+...)/8.
+    assert plausibilitaet.basis(werte) < 2.0
+
+    # Der ganz normale naechste Lauf darf davon nicht beanstandet werden.
+    plausibilitaet.pruefe(conn, "ausreisser", anzahl=12, tage=7.0)
+
+
+def test_jede_stadt_sagt_selbst_welche_abruf_art_sie_fuehrt():
+    """Ohne diese Angabe landen Bestand und Zeitfenster im selben Topf.
+
+    Berlin liefert den Bestand und kennt kein Fenster, eine Open311-Stadt
+    liefert im taeglichen Lauf sieben Tage. Die Angabe stammt von der Quelle
+    selbst und nicht von einer Liste in ``tracker.py`` — sonst waere sie beim
+    Eintragen der dritten Stadt genau die Zeile, die jemand vergisst.
+    """
+    assert quellen.BERLIN.fenster_tage() is None
+    assert quellen.KOELN.fenster_tage() == 7.0
+    assert probquelle().fenster_tage() == 7.0
+
+
+def test_bestandsabruf_und_zeitraum_abruf_werden_nicht_vermischt():
+    """Berlins Bestand ist kein Massstab fuer Koelns Woche.
+
+    Berlin liefert je Abruf den vollstaendigen Bestand (zuletzt 105.456), eine
+    Open311-Stadt ein Zeitfenster. Wuerde beides in denselben Topf fallen,
+    haette Koeln eine Untergrenze im fuenfstelligen Bereich und jeder Lauf
+    waere ein Ausfall.
+
+    Deshalb traegt ``fetch_log.zeitraum_tage`` die Fensterlaenge, und ``NULL``
+    steht fuer den Bestandsabruf. Aeltere Zeilen ohne den Wert gelten als
+    Bestandsabruf — fuer Berlin richtig, und Koelns zwei Rueckimport-Zeilen
+    fallen damit aus dem Vorlauf, statt ihn um den Faktor 100 anzuheben.
+    """
+    conn = _leeres_protokoll()
+    _protokoll(conn, "misch", [105456] * 8, tage=None)      # Bestandsabruf
+    _protokoll(conn, "misch", [64386], tage=None)           # Rueckimport-Altzeile
+
+    # Als Zeitraum-Abruf gibt es keinen brauchbaren Vorlauf — also kein Urteil,
+    # statt eines Urteils an der falschen Groesse.
+    vermerk = plausibilitaet.pruefe(conn, "misch", anzahl=650, tage=7.0)
+    assert vermerk["vorlauf_laeufe"] == 0
+    assert vermerk["untergrenze"] == 0
+
+    # Als Bestandsabruf traegt derselbe Vorlauf sehr wohl.
+    with pytest.raises(plausibilitaet.AbrufUnplausibel):
+        plausibilitaet.pruefe(conn, "misch", anzahl=650, tage=None)
+
+
+def test_ohne_vorlauf_wird_eine_neue_stadt_nicht_auf_verdacht_beanstandet():
+    """Eine frisch angebundene Stadt hat keinen Vorlauf — und bekommt kein Urteil.
+
+    Das ist Absicht und keine Luecke: ohne eigene Vergangenheit gibt es nichts,
+    woran sich eine Menge messen liesse. Der vollstaendig leere Abruf bleibt
+    davon unberuehrt, den faengt ``tracker.run`` ohne jeden Vorlauf (H-02b).
+    """
+    conn = _leeres_protokoll()
+    _protokoll(conn, "neustadt", [12, 11, 13, 12], tage=7.0)   # vier, noetig sind fuenf
+
+    vermerk = plausibilitaet.pruefe(conn, "neustadt", anzahl=1, tage=7.0)
+    assert vermerk["untergrenze"] == 0
+    assert vermerk["basis"] is None
+
+
+def test_ein_gerissener_mengenriegel_endet_wie_ein_ausfall(tmp_path, monkeypatch):
+    """Der Riegel im Betrieb — und zwar an BERLIN, das die alte Pruefung nie sah.
+
+    ``open311.pruefe_plausibel`` sitzt in ``hole_zeitraum``. Berlins Feed hat
+    seinen eigenen Leser in ``quellen.BerlinQuelle`` und laeuft dort nie durch;
+    Berlins Quelle liefert seit dem 23.04.2026 nachweislich 0 Meldungen je Lauf,
+    und nichts hat je angeschlagen. Dieselbe Fehlerklasse wie T-55 und T-66.
+
+    Geprueft wird das Verhalten, nicht die Rechnung: ein gerissener Riegel muss
+    denselben Weg nehmen wie ein leerer Abruf — Rueckgabewert 1, Fehlermarke im
+    Abrufprotokoll, KEIN Neuaufbau der Zellen, also auch kein Push.
+    """
+    db_pfad = tmp_path / "riegel.db"
+    monkeypatch.setattr(tracker, "DB_PATH", db_pfad)
+
+    conn = sqlite3.connect(db_pfad)
+    tracker.init_db(conn)
+    _protokoll(conn, "berlin", [100] * 8, tage=None)
+    conn.close()
+
+    # Drei muellnahe Meldungen in einer Zelle. Ohne Riegel waere das ein
+    # geglueckter Lauf, der eine Zelle anlegt — der Vorlauf sagt aber 100.
+    duenn = [{"id": str(i), "kategorie": "Sperrmüll", "betreff": "",
+              "bezirk": "Mitte", "lat": 52.5, "lon": 13.4, "status": "offen",
+              "erstellungsDatum": f"0{i + 1}.01.2026"} for i in range(3)]
+    monkeypatch.setattr(tracker, "fetch_meldungen", lambda: duenn)
+
+    assert tracker.run() == 1, (
+        "Ein Abruf mit 3 von 100 erwarteten Meldungen muss wie ein Ausfall "
+        "enden. Kommt hier 0 zurueck, hat der Lauf als geglueckt gegolten und "
+        "der Launcher haette gepusht.")
+
+    conn = sqlite3.connect(db_pfad)
+    zellen = conn.execute("SELECT COUNT(*) FROM hotspots").fetchone()[0]
+    letzte = conn.execute(
+        "SELECT count_total, plausibel FROM fetch_log ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+
+    assert zellen == 0, (
+        "Aus einem unplausiblen Abruf darf nichts neu aufgebaut werden (H-02b).")
+    assert letzte == (-1, 0), (
+        "Der gerissene Lauf muss als Fehlermarke und als unplausibel im "
+        "Abrufprotokoll stehen, sonst zieht er den eigenen Massstab nach unten.")
+
+
 # ── Der bekannte Rest: was diese Datei NICHT beweist ─────────────────────────
 
-def test_plausibilitaetsschwelle_traegt_bei_geringer_dichte_nicht_mehr():
-    """Kennzeichnung einer gemessenen LUECKE, kein Nachweis einer Zusicherung.
+def test_die_alte_schwelle_bleibt_im_rueckimport_die_einzige_pruefung():
+    """Kennzeichnung des Restes, den T-79 NICHT geschlossen hat.
 
-    ``pruefe_plausibel`` laeuft fuer jede Stadt — aber ihre Wirkung haengt an
-    der Meldungsdichte, und Bonn ist rund fuenfzigmal duenner als Koeln.
+    ``rueckimport.py`` ruft ``open311.hole_zeitraum`` unmittelbar und erreicht
+    ``tracker.run`` nie. Dort gilt weiterhin die alte, dichteabhaengige Regel
+    mit ihrem Sockel ``max(1, ...)`` — und sie kann dort auch nicht durch den
+    Mengenriegel ersetzt werden: der misst am eigenen Vorlauf, und beim
+    erstmaligen Rueckimport einer Stadt gibt es noch keinen.
 
-      Koeln    93,0 Meldungen je Tag gemessen, Schwelle 5,0  (Abstand 18,6-fach)
-      Bonn      1,7 Meldungen je Tag im Jahr 2024 (alle Kategorien)
-
-    Bei gleichem Sicherheitsabstand ergibt das fuer Bonn eine Schwelle von
-    0,09 je Tag. In ``pruefe_plausibel`` steht ``erwartet = max(1, int(tage *
-    mindest_je_tag))`` — auf die Woche des taeglichen Laufs gerechnet verlangt
-    das GENAU EINE Meldung, wo in Wahrheit zwoelf kommen. Ein Ausfall, der eine
-    einzige Meldung durchlaesst, geht damit als gueltiger Lauf durch.
-
-    Dieser Test haelt den Zustand fest, damit er nicht in Vergessenheit
-    geraet. Er wird rot, sobald ein wirksamerer Riegel eingebaut wird — und das
-    ist dann die richtige Gelegenheit, ihn durch den Nachweis des neuen Riegels
-    zu ersetzen. Ein gruener Test ueber einer bekannten Luecke ist besser als
-    eine Notiz in einem Bericht, den niemand mehr liest.
-
-    Entschieden ist der Riegel NICHT: die Schwelle einer Stadt gehoert an deren
-    eigene Daten gemessen, und die Bonner Schnittstelle war am 17.08.2026 nicht
-    erreichbar.
+    Tragweite, ehrlich: der Rueckimport ist ein beaufsichtigter Einzelvorgang
+    mit eigenem Bericht, kein taeglicher Lauf. Der taegliche Lauf, um den es in
+    T-79 ging, ist abgedeckt. Dieser Test haelt den Rest fest, damit er nicht
+    fuer erledigt gehalten wird.
     """
     jetzt = datetime(2026, 8, 17)
     woche = open311.Zeitraum(von=jetzt - timedelta(days=8),
                              bis=jetzt - timedelta(days=1))
 
-    # Eine einzige Meldung in einer Woche, in der zwoelf zu erwarten waeren:
-    # geht durch. Das ist die Luecke.
+    # Bei duenner Dichte verlangt die alte Regel weiterhin genau eine Meldung.
     open311.pruefe_plausibel([{}], woche, 0.09, jetzt=jetzt)
-
-    # Nur der vollstaendige Ausfall wird noch gefangen.
-    with pytest.raises(open311.AbrufUnplausibel):
-        open311.pruefe_plausibel([], woche, 0.09, jetzt=jetzt)
-
-    # Zum Vergleich: bei Koelner Dichte traegt dieselbe Pruefung sehr wohl.
-    with pytest.raises(open311.AbrufUnplausibel):
-        open311.pruefe_plausibel([{}] * 30, woche, 5.0, jetzt=jetzt)

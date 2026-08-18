@@ -78,6 +78,17 @@ class Quelle:
     def hole_meldungen(self, zeitraum=None) -> list[dict]:
         raise NotImplementedError
 
+    def fenster_tage(self, zeitraum=None) -> float | None:
+        """Fensterlänge des Abrufs in Tagen, ``None`` bei einem Bestandsabruf.
+
+        Der Mengenriegel aus T-79 vergleicht einen Abruf mit dem eigenen
+        Vorlauf dieser Stadt. Dafür muss er die beiden Abruf-Arten
+        auseinanderhalten: ein Bestandsabruf ist mit einem Bestand zu
+        vergleichen, ein Zeitraum-Abruf je Tag. Die Vorgabe ist der
+        Bestandsabruf, weil das die ältere und die Berliner Bauart ist.
+        """
+        return None
+
     def kennung(self, meldung: dict) -> str:
         raise NotImplementedError
 
@@ -271,6 +282,17 @@ class Open311Quelle(Quelle):
                                              self.standard_zeitraum_tage)
         return open311.hole_zeitraum(
             self.url, zeitraum, self.mindest_meldungen_je_tag, **kwargs)
+
+    def fenster_tage(self, zeitraum=None) -> float | None:
+        """Ein Open311-Abruf ist immer ein Zeitraum, nie ein Bestand.
+
+        Ohne übergebenen Zeitraum nimmt ``hole_meldungen`` den Standard der
+        Stadt — hier dieselbe Rechnung, damit im Abrufprotokoll die Länge
+        steht, die tatsächlich abgerufen wurde.
+        """
+        if zeitraum is not None:
+            return zeitraum.tage
+        return float(self.standard_zeitraum_tage) if self.standard_zeitraum_tage else None
 
     def kennung(self, meldung: dict) -> str:
         import tracker

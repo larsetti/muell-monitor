@@ -19,6 +19,7 @@ from pathlib import Path
 
 import betreff_filter
 import open311
+import plausibilitaet
 import quellen
 import retention
 import sperrliste
@@ -182,7 +183,9 @@ def init_db(conn: sqlite3.Connection):
             count_total INTEGER,
             count_new   INTEGER,
             count_muell INTEGER,
-            stadt       TEXT NOT NULL DEFAULT 'berlin'
+            stadt       TEXT NOT NULL DEFAULT 'berlin',
+            zeitraum_tage REAL,
+            plausibel   INTEGER DEFAULT 1
         );
     """)
     conn.commit()
@@ -219,6 +222,29 @@ def init_db(conn: sqlite3.Connection):
         conn.commit()
     except sqlite3.OperationalError:
         pass
+
+    # T-79: der Mengenriegel misst einen Abruf am eigenen Vorlauf dieser Stadt.
+    # Dafür braucht das Abrufprotokoll zwei Angaben mehr.
+    #
+    # zeitraum_tage — die Fensterlänge des Abrufs. NULL bedeutet Bestandsabruf
+    #   (Berlin liefert den vollständigen Bestand, kein Fenster). Ohne diese
+    #   Angabe wären Kölns 7-Tage-Lauf und sein 24-Monats-Rückimport dieselbe
+    #   Größe, und der Rückimport würde den Maßstab um den Faktor 100 anheben.
+    #   Ältere Zeilen bleiben bewusst NULL: für Berlin ist das richtig, und
+    #   Kölns zwei Rückimport-Zeilen fallen damit aus dem Vorlauf heraus,
+    #   statt falsch einsortiert zu werden.
+    #
+    # plausibel — ob der Riegel diesen Lauf durchgelassen hat. Ein Lauf, der
+    #   selbst als Ausfall erkannt wurde, darf nicht in den Maßstab eingehen;
+    #   sonst zöge eine langsam abbauende Quelle ihren eigenen Maßstab mit nach
+    #   unten und wäre nach ein paar Wochen der neue Normalstand.
+    for col, typedef in [("zeitraum_tage", "REAL"),
+                         ("plausibel", "INTEGER DEFAULT 1")]:
+        try:
+            conn.execute(f"ALTER TABLE fetch_log ADD COLUMN {col} {typedef}")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
 
     conn.executescript("""
         CREATE INDEX IF NOT EXISTS idx_stadt_datum  ON meldungen(stadt, datum);
@@ -849,6 +875,9 @@ def run(stadt: str = None, zeitraum=None):
 
     now = datetime.utcnow().isoformat()
     log.info("Lauf fuer %s (%s)", quelle.name, quelle.stadt)
+    # Fensterlänge des Abrufs, für den Mengenriegel und für das Abrufprotokoll.
+    # None bedeutet Bestandsabruf (Berlin).
+    fenster_tage = quelle.fenster_tage(zeitraum)
     try:
         meldungen = (quelle.hole_meldungen(zeitraum) if zeitraum is not None
                      else quelle.hole_meldungen())
@@ -860,6 +889,26 @@ def run(stadt: str = None, zeitraum=None):
         meldungen = []
     log.info("%d Meldungen von der Quelle %s erhalten", len(meldungen), quelle.stadt)
 
+    # ── T-79: Mengenriegel gegen den eigenen Vorlauf ──────────────────────────
+    # Hier und nicht in open311.py, weil der Riegel für JEDE Stadt gelten muss.
+    # Die alte Prüfung sass in ``open311.hole_zeitraum`` und sah Berlin deshalb
+    # nie — Berlins Quelle liefert seit dem 23.04.2026 nachweislich 0 Meldungen
+    # je Lauf, und nichts hat je angeschlagen. Dieselbe Fehlerklasse wie T-55
+    # und T-66: ein Schutz am Code-Weg einer Stadt fällt bei der nächsten stumm
+    # aus.
+    #
+    # Ein gerissener Riegel endet wie ein leerer Abruf: Fehlermarke im
+    # Abrufprotokoll, keine Wegfall-Markierung, kein Neuaufbau der Zellen, kein
+    # Push. Das ist bewusst derselbe Weg wie bei H-02b und kein eigener
+    # Exit-Code — was an den ausgelieferten Adressen steht, ist in beiden
+    # Fällen dasselbe.
+    if meldungen:
+        try:
+            plausibilitaet.pruefe(conn, quelle.stadt, len(meldungen), fenster_tage)
+        except plausibilitaet.AbrufUnplausibel as fehler:
+            log.error("Mengenriegel fuer %s gerissen: %s", quelle.stadt, fehler)
+            meldungen = []
+
     # H-02b: Leerer Abruf darf NICHT still als Erfolg durchgehen. Sonst läuft
     # die Pipeline über alte Daten weiter und das Frontend behauptet weiter
     # "tagesaktuell". Fehler-Marker in fetch_log (count_total=-1) schreiben und
@@ -868,10 +917,14 @@ def run(stadt: str = None, zeitraum=None):
         log.error("Abruf fuer %s lieferte 0 Meldungen — Ausfall oder leerer "
                   "Feed. Pipeline wird abgebrochen, kein Hotspot-Neuaufbau, "
                   "kein Push.", quelle.stadt)
+        # T-79: plausibel=0 hält fest, dass dieser Lauf kein Maßstab ist. Die
+        # Fehlermarke -1 fiele zwar ohnehin aus dem Vorlauf, aber die Spalte
+        # soll sagen, was war, und nicht auf einen Nebeneffekt bauen.
         conn.execute("""
-            INSERT INTO fetch_log (fetched_at, count_total, count_new, count_muell, stadt)
-            VALUES (?,?,?,?,?)
-        """, (now, -1, 0, 0, quelle.stadt))
+            INSERT INTO fetch_log (fetched_at, count_total, count_new, count_muell,
+                                   stadt, zeitraum_tage, plausibel)
+            VALUES (?,?,?,?,?,?,?)
+        """, (now, -1, 0, 0, quelle.stadt, fenster_tage, 0))
         conn.commit()
         # A-4 / Finding H-01 (29.07.2026): Die Fristen laufen AUCH hier.
         # Die Speicherbegrenzung nach Art. 5 Abs. 1 lit. e darf nicht daran
@@ -974,9 +1027,11 @@ def run(stadt: str = None, zeitraum=None):
     berechne_hotspots(conn, quelle)
 
     conn.execute("""
-        INSERT INTO fetch_log (fetched_at, count_total, count_new, count_muell, stadt)
-        VALUES (?,?,?,?,?)
-    """, (now, len(meldungen), count_new, count_muell, quelle.stadt))
+        INSERT INTO fetch_log (fetched_at, count_total, count_new, count_muell,
+                               stadt, zeitraum_tage, plausibel)
+        VALUES (?,?,?,?,?,?,?)
+    """, (now, len(meldungen), count_new, count_muell, quelle.stadt,
+          fenster_tage, 1))
     conn.commit()
 
     hotspots_gesamt = conn.execute("SELECT COUNT(*) FROM hotspots").fetchone()[0]
